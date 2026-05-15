@@ -1,21 +1,25 @@
-# Elk uur op het hele uur (UTC), zelfde cadans als de oude Alpaca `trade`-workflow (`0 * * * *`).
-# Alleen op de default branch; Zet repo-secrets + optioneel `KRAKEN_DRY_RUN` (variable).
-name: Kraken range bot (USD)
+# Uurlijk (UTC): zelfde bestandsnaam en cadans als de oude Alpaca `trade.yml`.
+# Cron: minuut 0 van elk uur → 00:00, 01:00, 02:00 … UTC.
+# Geplande runs alleen op de default branch. Actions moet aan staan onder repo Settings.
+name: Hourly — Kraken trade
+
+run-name: Hourly Kraken — ${{ github.event_name }}
+
 on:
   schedule:
     - cron: "0 * * * *"
   workflow_dispatch:
 
 concurrency:
-  group: kraken-range-bot-scheduled
+  group: kraken-hourly-trade
   cancel-in-progress: false
 
 permissions:
   contents: read
-  actions: write  # upload-artifact (journals)
+  actions: write # upload-artifact (journals)
 
 jobs:
-  trade-kraken:
+  hourly-kraken-trade:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,14 +35,14 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install dependencies
         run: pip install -e .
 
       # Live limits: set repository variable KRAKEN_DRY_RUN=false. Unset/empty/true = dry-run (default in app).
       - name: Run Kraken range bot
-        id: trade_kraken
+        id: kraken_trade
         env:
           KRAKEN_API_KEY: ${{ secrets.KRAKEN_API_KEY }}
           KRAKEN_API_SECRET: ${{ secrets.KRAKEN_API_SECRET }}
