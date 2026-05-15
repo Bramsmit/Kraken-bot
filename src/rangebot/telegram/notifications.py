@@ -2,12 +2,7 @@
 
 from __future__ import annotations
 
-from rangebot.config.settings import (
-    BITVAVO_FEE_BUY_RATE,
-    BITVAVO_FEE_SELL_LIMIT_RATE,
-    JOURNAL_FIXED_FEE_PER_FILL_USD,
-    TELEGRAM_NOTIFY_BUY_FILLS,
-)
+from rangebot.config.settings import TELEGRAM_NOTIFY_BUY_FILLS
 from rangebot.telegram.client import send_plain_message
 
 
@@ -44,22 +39,13 @@ def notify_trade_filled(
     portfolio_value: float,
     entry_price: float | None = None,
     *,
-    fee_buy_rate: float | None = None,
-    fee_sell_rate: float | None = None,
-    fixed_fee_per_fill: float | None = None,
     currency_label: str = "USD",
-    fee_eur: float | None = None,
-    fee_estimated: bool = False,
     send_telegram_message: bool | None = None,
+    exchange_fee_usd: float | None = None,
+    exchange_buy_fee_usd: float | None = None,
+    exchange_sell_fee_usd: float | None = None,
 ) -> bool:
-    """Notify a fill with optional PnL narrative (fee model from settings)."""
-    r_buy = BITVAVO_FEE_BUY_RATE if fee_buy_rate is None else fee_buy_rate
-    r_sell = BITVAVO_FEE_SELL_LIMIT_RATE if fee_sell_rate is None else fee_sell_rate
-    fixed = (
-        JOURNAL_FIXED_FEE_PER_FILL_USD
-        if fixed_fee_per_fill is None
-        else fixed_fee_per_fill
-    )
+    """Notify a fill using Kraken/ccxt fee amounts when available."""
     cur = _currency_prefix(currency_label)
     side_l = side.lower()
     if send_telegram_message is None:
@@ -71,13 +57,9 @@ def notify_trade_filled(
 
     if side_l == "sell" and qty > 0 and entry_price and entry_price > 0:
         gross = (price - entry_price) * qty
-        fee_buy = entry_price * qty * r_buy + fixed
-        fee_sell = price * qty * r_sell + fixed
-        fees_total = fee_buy + fee_sell
-        net = gross - fee_buy - fee_sell
-        cost_basis = entry_price * qty * (1 + r_buy) + fixed
-        pct = (net / cost_basis * 100) if cost_basis else 0.0
         notional = qty * price
+        bb = exchange_buy_fee_usd
+        sb = exchange_sell_fee_usd
         msg = (
             f"✅ Afgeronde trade: {symbol}\n"
             f"Verkoop: {qty:.6f} @ {cur}{price:.4f} "
@@ -85,30 +67,40 @@ def notify_trade_filled(
         )
         msg += f"\nReferentie inkoop (avg): {cur}{entry_price:.4f}"
         msg += f"\n📈 Bruto winst: {cur}{gross:.2f}"
-        msg += f"\n📉 Transactiekosten (kopen): {cur}{fee_buy:.2f}"
-        msg += f"\n📉 Transactiekosten (verkoop): {cur}{fee_sell:.2f}"
-        msg += f"\n💸 Totaal fictieve kosten (model): {cur}{fees_total:.2f}"
-        msg += (
-            f"\n📊 Rendement na kosten: {cur}{net:.2f} "
-            f"({pct:+.1f}% t.o.v. kostbasis)"
-        )
+        if bb is not None:
+            msg += f"\n📉 Transactiekosten Kraken (koop): {cur}{bb:.2f}"
+        if sb is not None:
+            msg += f"\n📉 Transactiekosten Kraken (verkoop): {cur}{sb:.2f}"
+        if bb is not None and sb is not None:
+            tot = bb + sb
+            msg += f"\n💸 Totaal transactiekosten Kraken: {cur}{tot:.2f}"
+            net = gross - tot
+        elif sb is not None:
+            net = gross - sb
+        elif bb is not None:
+            net = gross - bb
+        else:
+            net = gross
+            msg += "\n💡 Geen fee-bedragen in Kraken trade-response (ccxt)."
+        if bb is not None or sb is not None:
+            cost_basis = entry_price * qty + (bb or 0)
+            pct = (net / cost_basis * 100) if cost_basis else 0.0
+            msg += (
+                f"\n📊 Rendement na Kraken-kosten: {cur}{net:.2f} "
+                f"({pct:+.1f}% t.o.v. kosten + inkoop)"
+            )
+        elif profit is not None:
+            msg += f"\n📊 Netto (journal): {cur}{profit:.2f}"
     else:
         emoji = "🟢" if side_l == "buy" else "🔴"
         msg = f"{emoji} Trade: {side.upper()} {qty} {symbol} @ {cur}{price:.4f}"
         if side_l == "buy" and qty > 0 and price > 0:
-            fee_pct_leg = price * qty * r_buy
-            fee_buy_total = fee_pct_leg + fixed
-            msg += f"\n📉 Transactiekosten (kopen): {cur}{fee_buy_total:.2f}"
-            detail = f"maker {r_buy * 100:.2f}%: {cur}{fee_pct_leg:.2f}"
-            if fixed > 0:
-                detail += f", vast: {cur}{fixed:.2f}"
-            msg += f"\n   ({detail})"
+            if exchange_fee_usd is not None:
+                msg += f"\n📉 Transactiekosten Kraken: {cur}{exchange_fee_usd:.2f}"
+            else:
+                msg += "\n💡 Geen fee in Kraken trade-response (ccxt)."
         elif side_l == "sell" and profit is not None:
-            msg += f"\n✅ Netto (alleen bekend): {cur}{profit:.2f}"
-
-    if fee_eur is not None:
-        tag = " (≈ geschat)" if fee_estimated else ""
-        msg += f"\n💡 Deze fill volgens exchange: {cur}{fee_eur:.2f}{tag}"
+            msg += f"\n✅ Netto (journal): {cur}{profit:.2f}"
 
     msg += f"\n📊 Totaal portfolio: {cur}{portfolio_value:.2f}"
     return send_plain_message(msg)

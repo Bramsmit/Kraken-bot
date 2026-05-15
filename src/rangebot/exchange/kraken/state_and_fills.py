@@ -10,14 +10,11 @@ from pathlib import Path
 from typing import Any
 
 from rangebot.config.settings import (
-    BITVAVO_FEE_BUY_RATE,
-    BITVAVO_FEE_SELL_LIMIT_RATE,
     FILLED_ORDERS_LOOKBACK_HOURS,
-    JOURNAL_FIXED_FEE_PER_FILL_USD,
     TELEGRAM_NOTIFY_BUY_FILLS,
 )
 from rangebot.exchange.base import ExchangeClient
-from rangebot.exchange.kraken.common import norm_symbol
+from rangebot.exchange.kraken.common import norm_symbol, trade_fee_usd_from_ccxt
 from rangebot.journal import log_trade
 from rangebot.telegram.notifications import notify_trade_filled
 from rangebot.utils.paths import repository_root
@@ -44,11 +41,14 @@ def _state_path() -> Path:
     return repository_root() / ".kraken_trade_state.json"
 
 
+_STATE_CUM_FEES = "cumulative_kraken_fees_usd"
+
+
 def _load_state() -> dict[str, Any]:
     base = {
         "entries": {},
         "notified_trade_ids": [],
-        "cumulative_fictive_fees_usd": 0.0,
+        _STATE_CUM_FEES: 0.0,
     }
     path = _state_path()
     if not path.exists():
@@ -58,9 +58,10 @@ def _load_state() -> dict[str, Any]:
         out = base.copy()
         out["entries"] = data.get("entries", {})
         out["notified_trade_ids"] = data.get("notified_trade_ids", [])
-        out["cumulative_fictive_fees_usd"] = float(
-            data.get("cumulative_fictive_fees_usd", 0) or 0
-        )
+        if _STATE_CUM_FEES in data:
+            out[_STATE_CUM_FEES] = float(data.get(_STATE_CUM_FEES) or 0)
+        else:
+            out[_STATE_CUM_FEES] = 0.0
         return out
     except Exception:
         return base.copy()
@@ -70,7 +71,7 @@ def save_kraken_state(
     *,
     entries: dict[str, Any] | None = None,
     notified_trade_ids: list[str] | None = None,
-    cumulative_fictive_fees_usd: float | None = None,
+    cumulative_kraken_fees_usd: float | None = None,
 ) -> None:
     path = _state_path()
     state = _load_state()
@@ -78,18 +79,21 @@ def save_kraken_state(
         state["entries"] = entries
     if notified_trade_ids is not None:
         state["notified_trade_ids"] = notified_trade_ids[-500:]
-    if cumulative_fictive_fees_usd is not None:
-        state["cumulative_fictive_fees_usd"] = float(
-            cumulative_fictive_fees_usd
-        )
+    if cumulative_kraken_fees_usd is not None:
+        state[_STATE_CUM_FEES] = float(cumulative_kraken_fees_usd)
     try:
         path.write_text(json.dumps(state, indent=2))
     except Exception as e:
         log.warning("Kraken state schrijven mislukt: %s", e)
 
 
+def get_kraken_cumulative_kraken_fees_usd() -> float:
+    return float(_load_state().get(_STATE_CUM_FEES, 0) or 0)
+
+
 def get_kraken_cumulative_fictive_fees_usd() -> float:
-    return float(_load_state().get("cumulative_fictive_fees_usd", 0) or 0)
+    """Deprecated: gebruik :func:`get_kraken_cumulative_kraken_fees_usd`."""
+    return get_kraken_cumulative_kraken_fees_usd()
 
 
 def load_kraken_trade_state() -> dict[str, Any]:
@@ -126,7 +130,7 @@ def check_and_notify_kraken_fills(
     portfolio_usd: float,
 ) -> tuple[int, dict[str, Any]]:
     """
-    Poll recent trades; journal + Telegram; update entries for PnL model.
+    Poll recent trades; journal + Telegram; fees from Kraken/ccxt trade object.
 
     Returns (new_trade_count, updated_entries).
     """
@@ -160,7 +164,7 @@ def check_and_notify_kraken_fills(
         entries: dict[str, Any] = dict(state.get("entries", {}))
         notified = list(state.get("notified_trade_ids", []))
         notified_set = set(notified)
-        cum_fees = float(state.get("cumulative_fictive_fees_usd", 0) or 0)
+        cum_fees = float(state.get(_STATE_CUM_FEES, 0) or 0)
         new_count = 0
 
         for tr in trades_sorted:
@@ -178,47 +182,54 @@ def check_and_notify_kraken_fills(
             if side not in ("buy", "sell"):
                 continue
 
+            fee_usd = trade_fee_usd_from_ccxt(tr, symbol=sym, price=price)
+            if fee_usd is not None:
+                cum_fees += fee_usd
+
+            buy_fee_this: float | None = None
+
             if side == "buy":
-                cum_fees += (
-                    qty * price * BITVAVO_FEE_BUY_RATE
-                    + JOURNAL_FIXED_FEE_PER_FILL_USD
-                )
+                add_fee = fee_usd if fee_usd is not None else 0.0
                 prev = entries.get(sym)
                 if prev and float(prev.get("qty") or 0) > 0:
                     pq = float(prev["qty"])
                     pe = float(prev.get("entry") or 0)
+                    prev_bf = float(prev.get("buy_fee_usd") or 0)
                     new_qty = pq + qty
                     new_entry = (
                         (pe * pq + price * qty) / new_qty
                         if new_qty > 0
                         else price
                     )
-                    entries[sym] = {"qty": new_qty, "entry": new_entry}
+                    entries[sym] = {
+                        "qty": new_qty,
+                        "entry": new_entry,
+                        "buy_fee_usd": prev_bf + add_fee,
+                    }
                 else:
-                    entries[sym] = {"qty": qty, "entry": price}
+                    entries[sym] = {
+                        "qty": qty,
+                        "entry": price,
+                        "buy_fee_usd": add_fee,
+                    }
                 profit = None
                 entry_price_for_log = None
             else:
-                cum_fees += (
-                    qty * price * BITVAVO_FEE_SELL_LIMIT_RATE
-                    + JOURNAL_FIXED_FEE_PER_FILL_USD
-                )
                 profit = None
                 entry_price_for_log = None
                 if sym in entries:
+                    prev_qty = float(entries[sym].get("qty") or 0)
+                    prev_bf = float(entries[sym].get("buy_fee_usd") or 0)
                     entry = float(entries[sym].get("entry") or 0)
                     entry_price_for_log = entry if entry > 0 else None
+                    frac = min(1.0, qty / prev_qty) if prev_qty > 0 else 1.0
+                    buy_fee_this = prev_bf * frac
+
                     if entry > 0:
-                        cost_incl = (
-                            entry * qty * (1 + BITVAVO_FEE_BUY_RATE)
-                            + JOURNAL_FIXED_FEE_PER_FILL_USD
-                        )
-                        proceeds = (
-                            price * qty * (1 - BITVAVO_FEE_SELL_LIMIT_RATE)
-                            - JOURNAL_FIXED_FEE_PER_FILL_USD
-                        )
-                        profit = proceeds - cost_incl
-                    prev_qty = float(entries[sym].get("qty") or 0)
+                        gross = (price - entry) * qty
+                        sell_f = fee_usd if fee_usd is not None else 0.0
+                        profit = gross - buy_fee_this - sell_f
+
                     remain_q = prev_qty - qty
                     if remain_q <= 1e-12:
                         del entries[sym]
@@ -226,6 +237,7 @@ def check_and_notify_kraken_fills(
                         entries[sym] = {
                             "qty": remain_q,
                             "entry": entries[sym].get("entry"),
+                            "buy_fee_usd": max(0.0, prev_bf - buy_fee_this),
                         }
 
             ts_ms = tr.get("timestamp")
@@ -249,12 +261,15 @@ def check_and_notify_kraken_fills(
                     "notional_usd": round(qty * price, 10),
                     "portfolio_value_usd": round(portfolio_usd, 2),
                     "entry_price_usd_for_pnl": entry_price_for_log,
+                    "exchange_fee_usd": round(fee_usd, 10)
+                    if fee_usd is not None
+                    else None,
                     "estimated_roundtrip_profit_usd": round(profit, 8)
                     if profit is not None
                     else None,
                     "note": (
-                        "Kraken spot USD; journal gebruikt fictieve "
-                        "maker-fee percentages uit settings."
+                        "Kraken spot USD; fees uit ccxt trade-object; "
+                        "PnL verkoop minus toegewezen koopfee (partial fills)."
                     ),
                 }
             )
@@ -274,6 +289,9 @@ def check_and_notify_kraken_fills(
                 entry_price=entry_price_for_log,
                 send_telegram_message=send_tg,
                 currency_label="USD",
+                exchange_fee_usd=fee_usd if side == "buy" else None,
+                exchange_buy_fee_usd=buy_fee_this if side == "sell" else None,
+                exchange_sell_fee_usd=fee_usd if side == "sell" else None,
             )
             log_trade(
                 order_id=tid,
@@ -294,7 +312,7 @@ def check_and_notify_kraken_fills(
             save_kraken_state(
                 entries=entries,
                 notified_trade_ids=notified,
-                cumulative_fictive_fees_usd=cum_fees,
+                cumulative_kraken_fees_usd=cum_fees,
             )
         return new_count, entries
     except Exception as e:

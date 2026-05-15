@@ -14,6 +14,7 @@ from rangebot.exchange.kraken.state_and_fills import (
     fetch_open_orders,
     filter_kraken_usd_pool,
     get_kraken_cumulative_fictive_fees_usd,
+    get_kraken_cumulative_kraken_fees_usd,
     load_kraken_trade_state,
     save_kraken_state,
 )
@@ -34,6 +35,7 @@ __all__ = [
     "fetch_open_orders",
     "filter_kraken_usd_pool",
     "get_kraken_cumulative_fictive_fees_usd",
+    "get_kraken_cumulative_kraken_fees_usd",
     "load_kraken_credentials_from_env",
     "load_kraken_trade_state",
     "make_exchange",

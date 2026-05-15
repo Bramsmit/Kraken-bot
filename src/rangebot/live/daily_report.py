@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from kraken.kraken_runtime import (
     estimate_portfolio_usd,
     filter_kraken_usd_pool,
-    get_kraken_cumulative_fictive_fees_usd,
+    get_kraken_cumulative_kraken_fees_usd,
     make_exchange,
 )
 from rangebot.config.settings import SYMBOL_POOL
@@ -67,9 +67,9 @@ def send_daily_report() -> None:
             f"Portfolio (schatting): ${value:.2f}"
         )
 
-    cum_fees = get_kraken_cumulative_fictive_fees_usd()
+    cum_fees = get_kraken_cumulative_kraken_fees_usd()
     msg += (
-        f"\n\n💸 Fictieve transactiekosten (cumulatief, model): "
+        f"\n\n💸 Transactiekosten Kraken (cumulatief, volgens fills): "
         f"${cum_fees:.2f}"
     )
 

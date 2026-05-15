@@ -31,3 +31,35 @@ def post_only_from_env() -> bool:
         "yes",
         "on",
     )
+
+
+def trade_fee_usd_from_ccxt(
+    tr: dict[str, Any],
+    *,
+    symbol: str,
+    price: float,
+) -> float | None:
+    """
+    Parse unified ccxt trade ``fee`` into USD where possible (Kraken: ZUSD / quote).
+    Returns None if missing or currency not mapped.
+    """
+    fee = tr.get("fee")
+    if not isinstance(fee, dict):
+        return None
+    try:
+        cost = float(fee.get("cost") or 0)
+    except (TypeError, ValueError):
+        return None
+    if cost <= 0:
+        return None
+    ccy = str(fee.get("currency") or "").upper()
+    norm_ccy = ccy.lstrip("Z")
+    if norm_ccy in ("USD", "USDT"):
+        return cost
+    base = norm_symbol(symbol).split("/")[0].upper()
+    fb = ccy.lstrip("Z")
+    if fb in (base, "XBT") and base in ("BTC", "XBT"):
+        return cost * float(price or 0)
+    if fb == base:
+        return cost * float(price or 0)
+    return None
