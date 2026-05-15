@@ -1,33 +1,33 @@
-name: Dagelijks Portfoliorapport
+name: Dagelijks Portfoliorapport (Kraken USD)
 on:
   schedule:
-    - cron: '0 8 * * *'   # Dagelijks 8:00 UTC (9:00 Amsterdam)
-  workflow_dispatch:      # Handmatig starten via GitHub UI
+    - cron: '0 8 * * *'
+  workflow_dispatch:
 jobs:
   report:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Herstel trade state (cumulatieve fee-tracking)
+      - name: Herstel Kraken trade state (fee-tracking)
         uses: actions/cache@v4
         with:
-          path: .alpaca_trade_state.json
-          key: alpaca-daily-report-state-${{ runner.os }}-${{ github.run_id }}
+          path: .kraken_trade_state.json
+          key: kraken-daily-report-state-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
-            alpaca-trade-state-${{ runner.os }}-
+            kraken-trade-state-${{ runner.os }}-
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install -r bot_live/requirements.txt
+        run: pip install -e .
 
       - name: Stuur dagelijks portfoliorapport
         env:
-          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
-          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+          KRAKEN_API_KEY: ${{ secrets.KRAKEN_API_KEY }}
+          KRAKEN_API_SECRET: ${{ secrets.KRAKEN_API_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python -m bot_live.daily_report
+        run: python -m rangebot.live.daily_report

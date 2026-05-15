@@ -1,23 +1,16 @@
 ---
-description: Waar welke trading-bot staat en gedeelde Alpaca-code
+description: Kraken USD range-bot — actieve mappen
 alwaysApply: true
 ---
 
-# MCP-alpaca — package-indeling
+# Trading bot — layout (actief)
 
-- **`bot_range_1000/`** — Daily **range**-strategie op Alpaca (`live_trader.py`, backtests, export_handoff). Entry: `python -m bot_range_1000.live_trader`.
-- **`bot_hybrid/`** — **Hybrid** regime-trader (hourly). Entry: `python -m bot_hybrid.hybrid_trader`.
-- **`bot_live/`** — **Gedeelde infra:** `config.py`, Telegram, journal, Bitvavo-scripts, rapporten, `requirements.txt`, en **`alpaca_runtime.py`**.
+- **`src/rangebot/`** — Config, `strategy.range_strategy`, `exchange.kraken`, execution, Telegram, journal, `main`, **`live/`** (`run_loop`, `daily_report`, `cancel_all_orders`).
+- **`kraken/`** — `python -m kraken.live_trader`; `kraken_runtime.py`.
+- **`bot_live/`** — Alleen backward-compat `python -m bot_live.*` → `rangebot.live`, plus shims (`config`, `telegram`, `journal`).
+- **`scripts/run_bot.py`** — `rangebot.main`.
+- **`tests/`** — Pytest.
 
-## Alpaca-runtime (belangrijk)
+**Archief:** `_archive_not_kraken_relevant/` — o.a. `metrics/`, `docs/`, `exports/`, backtests, oude shims. Zie `ARCHIVE_REPORT.md` daarin.
 
-- **`bot_live/alpaca_runtime.py`** bevat o.a. `get_trading_clients`, `get_positions`, `get_open_orders`, limit-sell helpers, `_check_and_notify_filled_orders`, trade-state (`.alpaca_trade_state.json`).
-- Zowel **range** als **hybrid** importeren dit. Wijzigingen in `alpaca_runtime.py` kunnen **beide** bots beïnvloeden.
-- Range-**specifieke** logica (o.a. `select_top_symbols`, `run_once` loop) hoort in **`bot_range_1000/live_trader.py`**, niet dupliceren in hybrid.
-
-## Bitvavo
-
-- Bitvavo-bot en EUR-config: **`bot_live/bitvavo_*.py`**, niet onder `bot_range_1000`.
-- Standaard **post-only uit** (`POST_ONLY_LIMIT_ORDERS=False`), dichter bij Alpaca-limits; optioneel **`BITVAVO_POST_ONLY`** secret in Actions.
-- Journal naar CSV / metrics (alleen EUR-rijen uit JSONL): **`python -m metrics.bitvavo_compare`** — [`metrics/bitvavo_compare/README.md`](metrics/bitvavo_compare/README.md).
-- Run-audit JSONL (uurlijks): **`bitvavo_runs.jsonl`** / **`alpaca_runs.jsonl`** via **`bot_live/run_audit.py`**; vergelijken: **`python -m metrics.run_compare`** → `metrics/output/`.
+`BITVAVO_*`-feeconstanten in `settings` zijn historische namen voor maker/taker in journal/backtest (zelfde getallen).

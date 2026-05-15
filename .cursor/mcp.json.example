@@ -1,12 +1,3 @@
 {
-  "mcpServers": {
-    "alpaca": {
-      "command": "uvx",
-      "args": ["alpaca-mcp-server", "serve"],
-      "env": {
-        "ALPACA_API_KEY": "jouw_key",
-        "ALPACA_SECRET_KEY": "jouw_secret"
-      }
-    }
-  }
+  "mcpServers": {}
 }

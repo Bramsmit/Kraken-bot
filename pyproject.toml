@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rangebot"
+version = "0.1.0"
+description = "Kraken USD daily range trading bot"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "ccxt>=4.0.0",
+  "pandas>=2.0.0",
+  "pytz>=2020.1",
+  "requests>=2.28.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+  "ruff>=0.8.0",
+]
+
+[project.scripts]
+rangebot = "rangebot.main:main"
+rangebot-telegram = "rangebot.telegram.poll:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+# Beperkt tot stabiliteits-/foutchecks; geen line-length of style-upgrade rules die grote diffs geven.
+select = ["E", "F"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/rangebot/config/settings.py" = ["E402"]

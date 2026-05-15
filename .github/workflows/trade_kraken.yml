@@ -1,0 +1,61 @@
+name: Kraken range bot (USD)
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+jobs:
+  trade-kraken:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .kraken_trade_state.json
+            kraken_trades.jsonl
+            kraken_runs.jsonl
+            kraken_bot_trades.jsonl
+          key: kraken-trade-state-${{ runner.os }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -e .
+
+      # Live limits: set repository variable KRAKEN_DRY_RUN=false. Unset/empty/true = dry-run (default in app).
+      - name: Run Kraken range bot
+        id: trade_kraken
+        env:
+          KRAKEN_API_KEY: ${{ secrets.KRAKEN_API_KEY }}
+          KRAKEN_API_SECRET: ${{ secrets.KRAKEN_API_SECRET }}
+          KRAKEN_DRY_RUN: ${{ vars.KRAKEN_DRY_RUN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m kraken.live_trader
+
+      - name: Upload Kraken journals
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kraken-journals-${{ github.run_id }}
+          path: |
+            kraken_trades.jsonl
+            kraken_runs.jsonl
+            kraken_bot_trades.jsonl
+            .kraken_trade_state.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_CHAT_ID}" \
+            -d "text=❌ Kraken range-bot gefaald. Check GitHub Actions."

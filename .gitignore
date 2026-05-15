@@ -3,18 +3,32 @@ dist
 .DS_Store
 .env
 .cursor/mcp.json
-.alpaca_trade_state.json
-.alpaca_hybrid_state.json
+
+.kraken_trade_state.json
+.kraken_bot_control.json
+.kraken_day_state.json
+kraken_trades.jsonl
+kraken_runs.jsonl
+kraken_bot_trades.jsonl
 trades.jsonl
 bitvavo_trades.jsonl
 __pycache__
 *.pyc
+*.egg-info/
+
+# Lokale tooling / per ongeluk gekloonde map
 alpaca-server/
+Kraken-bot/
 
-# Handoff exports (trade-historie; python -m bot_range_1000.export_handoff)
-exports/alpaca_range_bot_v1_handoff_*.json
-exports/alpaca_range_bot_v1_handoff_*.md
+# Editor / legacy Alpaca state files (lokaal)
+.Rhistory
+.alpaca_day_state.json
+.alpaca_trade_state.json
 
-# Bitvavo metrics tool output (metrics/bitvavo_compare)
-metrics/output/*
-!metrics/output/.gitkeep
+# Archief: gegenereerde handoffs / tool-output
+_archive_not_kraken_relevant/exports/kraken_range_bot_handoff_*.json
+_archive_not_kraken_relevant/exports/kraken_range_bot_handoff_*.md
+_archive_not_kraken_relevant/metrics/output/*
+!_archive_not_kraken_relevant/metrics/output/.gitkeep
+_archive_not_kraken_relevant/metrics/kraken_range_bot_handoff_*.json
+_archive_not_kraken_relevant/metrics/kraken_range_bot_handoff_*.md

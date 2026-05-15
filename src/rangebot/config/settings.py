@@ -1,7 +1,7 @@
 """
 Configuratie voor de range-trading bot.
 
-USD spot (Kraken) defaults; fee constants are also referenced by journal/Telegram/Bitvavo tooling.
+USD spot (Kraken) defaults; fee constants worden gebruikt door journal, Telegram en backtests.
 """
 
 from __future__ import annotations
@@ -42,8 +42,7 @@ BUY_ABOVE_LOW_PCT = 0.005   # 0.5% boven de gem. low
 SELL_BELOW_HIGH_PCT = 0.02  # 2% onder de gem. high
 MIN_SPREAD_PCT = 0.02       # minimaal 2% spread tussen koop en verkoop
 
-# Bitvavo spot (EUR-markten), laagste tier tot ~€100k volume / 30 dagen:
-# maker vanaf 0,15%, taker vanaf 0,25%.
+# Reference maker/taker (historische namen BITVAVO_*); typische retail-tier: maker 0,15%, taker 0,25%.
 BITVAVO_MAKER_FEE_RATE = 0.0015
 BITVAVO_TAKER_FEE_RATE = 0.0025
 # Limietorders ≈ maker; stop/markt-exit ≈ taker (backtest).
@@ -84,7 +83,7 @@ def kraken_dry_run_from_env() -> bool:
 
 
 def required_min_spread_fraction_crypto_usd(ref_notional_usd: float) -> float:
-    """Min. relatieve spread (sell vs buy); zelfde model als bitvavo_config."""
+    """Min. relatieve spread (sell vs buy); fee-model uit :mod:`rangebot.config.settings`."""
     ref = (
         float(ref_notional_usd)
         if ref_notional_usd and ref_notional_usd > 0

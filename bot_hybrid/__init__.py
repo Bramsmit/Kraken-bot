@@ -1,1 +1,0 @@
-"""Hybrid regime-aware trader."""
