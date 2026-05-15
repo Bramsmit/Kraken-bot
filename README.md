@@ -2,8 +2,6 @@
 
 Python spot bot: **daily range** op **Kraken** (USD-paren). Strategielogica in `src/rangebot/strategy/`; runtime via `kraken/` en `rangebot.main`.
 
-Oude backtests/m metrics/docs/exports stonden eerder in git onder `_archive_not_kraken_relevant/`; terughalen kan met `git checkout <commit> -- _archive_not_kraken_relevant` (bijv. vlak vóór verwijdering op `main`).
-
 ## Quick start
 
 1. `pip install -e ".[dev]"` (productie: `pip install -e .`).

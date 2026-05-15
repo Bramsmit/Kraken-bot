@@ -24,11 +24,3 @@ Kraken-bot/
 .Rhistory
 .alpaca_day_state.json
 .alpaca_trade_state.json
-
-# Archief: gegenereerde handoffs / tool-output
-_archive_not_kraken_relevant/exports/kraken_range_bot_handoff_*.json
-_archive_not_kraken_relevant/exports/kraken_range_bot_handoff_*.md
-_archive_not_kraken_relevant/metrics/output/*
-!_archive_not_kraken_relevant/metrics/output/.gitkeep
-_archive_not_kraken_relevant/metrics/kraken_range_bot_handoff_*.json
-_archive_not_kraken_relevant/metrics/kraken_range_bot_handoff_*.md
