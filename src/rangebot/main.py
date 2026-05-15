@@ -63,9 +63,15 @@ from rangebot.telegram.control_state import is_trading_paused
 from rangebot.utils.logging import configure_stdout_logging
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_env_path = _REPO_ROOT / ".env"
-if _env_path.exists():
-    with open(_env_path, encoding="utf-8") as f:
+
+
+def load_dotenv_if_present(repo_root: Path | None = None) -> None:
+    """Populate process env from ``.env`` without overriding existing variables."""
+    root = repo_root or _REPO_ROOT
+    env_path = root / ".env"
+    if not env_path.exists():
+        return
+    with open(env_path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line and not line.startswith("#") and "=" in line:
@@ -73,14 +79,30 @@ if _env_path.exists():
                 os.environ.setdefault(key.strip(), value.strip().strip('"'))
 
 
-apply_kraken_telegram_env_overrides()
+def bootstrap_cli_environment(repo_root: Path | None = None) -> None:
+    """Load dotenv, Telegram env overrides for Kraken, and configure logging."""
+    load_dotenv_if_present(repo_root)
+    apply_kraken_telegram_env_overrides()
+    configure_stdout_logging()
 
-configure_stdout_logging()
+
+bootstrap_cli_environment()
 log = logging.getLogger(__name__)
 
 
 def run_once() -> dict:
-    """Single scheduled pass: select symbols, reconcile fills, maintain limits."""
+    """
+    Single scheduled pass: venue connection, symbol selection, fill reconcile, limit upkeep.
+
+    **Strategy impact:** symbol/level *selection* is delegated to
+    ``select_top_symbols_for_range`` / ``rangebot.strategy`` — unchanged by this loop.
+
+    **Phases:** (1) pause guard, pool filter; (2) ref-notional sizing and symbol pick;
+    (3) fill notify + mid prices + positions; (4) per-symbol order maintenance;
+    (5) persist state, audit line, Telegram summary.
+
+    Returns run stats ``{placed, updated, unchanged, skipped}`` or ``{}`` if skipped early.
+    """
     if is_trading_paused():
         log.info("run_once overgeslagen: trading staat op pauze (Telegram /pause).")
         return {}
