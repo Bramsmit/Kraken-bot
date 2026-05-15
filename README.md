@@ -31,6 +31,8 @@ Python spot bot: **daily range** op **Kraken** (USD-paren). Strategielogica in `
 
 Workflows: `ci.yml` (Ruff + Pytest + optionele Mypy), `trade_kraken.yml`, `daily_report.yml`, `daily_status.yml`.
 
+- **`trade_kraken.yml`** — **elk uur op het hele uur (UTC)** (`cron: 0 * * * *`), zelfde cadans als de vroegere Alpaca hourly trade-workflow. Draait alleen op de **default branch** van de repo.
+
 Onder **Settings → Secrets and variables → Actions** (waarden nooit in logs):
 
 | Secret | Rol |

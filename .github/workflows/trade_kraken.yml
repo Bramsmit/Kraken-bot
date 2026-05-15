@@ -1,8 +1,17 @@
+# Elk uur op het hele uur (UTC), zelfde cadans als de oude Alpaca `trade`-workflow (`0 * * * *`).
+# Alleen op de default branch; Zet repo-secrets + optioneel `KRAKEN_DRY_RUN` (variable).
 name: Kraken range bot (USD)
 on:
   schedule:
-    - cron: '0 * * * *'
+    - cron: "0 * * * *"
   workflow_dispatch:
+
+concurrency:
+  group: kraken-range-bot-scheduled
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   trade-kraken:
