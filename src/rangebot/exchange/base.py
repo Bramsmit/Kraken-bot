@@ -22,6 +22,17 @@ class ExchangeClient(ABC):
     def get_latest_price(self, symbol: str) -> float | None:
         """Mid or last price for ``symbol`` (e.g. ``BASE/USD``)."""
 
+    def maker_safe_limit_buy_price(
+        self, symbol: str, desired: float
+    ) -> float | None:
+        """Clamp limit buy so it does not cross the best ask (maker).
+
+        Override on venues that can inspect the book. Default: no clamp.
+        Return ``None`` only when no valid maker price exists.
+        """
+        _ = symbol
+        return float(desired)
+
     @abstractmethod
     def get_balances(self) -> dict[str, Any]:
         """Unified balances (ccxt-style ``{code: {free, used, total}}``)."""

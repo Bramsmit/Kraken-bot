@@ -445,8 +445,31 @@ def run_once() -> dict:
                         )
                         stats["skipped"] += 1
                         continue
-                    qty = capital_per / buy_level
                     limit_px = round_limit_price(buy_level)
+                    safe_px = client.maker_safe_limit_buy_price(
+                        symbol, limit_px
+                    )
+                    if safe_px is None:
+                        log.warning(
+                            "  %s: Buy skip (geen maker-prijs onder ask)",
+                            symbol,
+                        )
+                        stats["skipped"] += 1
+                        continue
+                    if safe_px < MICRO_PRICE_EPS:
+                        log.info("  %s: Prijs te laag na klemming", symbol)
+                        stats["skipped"] += 1
+                        continue
+                    if abs(safe_px - limit_px) > MICRO_PRICE_EPS:
+                        log.info(
+                            "  %s: Buy limiet geklemd %.6f → %.6f "
+                            "(geen marketable limit)",
+                            symbol,
+                            limit_px,
+                            safe_px,
+                        )
+                    limit_px = safe_px
+                    qty = capital_per / limit_px
                     try:
                         submit_limit_buy(
                             client,

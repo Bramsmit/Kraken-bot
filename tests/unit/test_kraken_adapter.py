@@ -9,6 +9,7 @@ import pytest
 
 from rangebot.config.settings import kraken_dry_run_from_env
 from rangebot.exchange.kraken.client import KrakenExchangeClient, create_kraken_client
+from rangebot.exchange.kraken.common import post_only_from_env
 from rangebot.exchange.kraken.transport import retry_ccxt
 from rangebot.exchange.kraken.validation import (
     OrderValidationError,
@@ -43,6 +44,16 @@ def test_kraken_dry_run_defaults_true(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_kraken_dry_run_explicit_false(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("KRAKEN_DRY_RUN", "false")
     assert kraken_dry_run_from_env() is False
+
+
+def test_post_only_defaults_true(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("KRAKEN_POST_ONLY", raising=False)
+    assert post_only_from_env() is True
+
+
+def test_post_only_explicit_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("KRAKEN_POST_ONLY", "false")
+    assert post_only_from_env() is False
 
 
 def test_retry_ccxt_succeeds_after_transient_failure(mock_ccxt: MagicMock) -> None:
@@ -142,3 +153,25 @@ def test_create_kraken_client_respects_env_dry_run(
     monkeypatch.setenv("KRAKEN_DRY_RUN", "true")
     c = create_kraken_client()
     assert c.dry_run is True
+
+
+def test_maker_safe_clamps_buy_at_or_above_ask(mock_ccxt: MagicMock) -> None:
+    """Aggressive limit (>= ask at venue precision) must be pulled below the ask."""
+    client = KrakenExchangeClient(mock_ccxt, dry_run=True)
+    client._market.fetch_ticker = MagicMock(
+        return_value={"bid": 0.24, "ask": 0.255, "last": 0.25}
+    )
+    out = client.maker_safe_limit_buy_price("ETH/USD", 0.2596)
+    assert out is not None
+    assert out == pytest.approx(0.25)
+    assert out < 0.26
+
+
+def test_maker_safe_unchanged_when_below_ask(mock_ccxt: MagicMock) -> None:
+    client = KrakenExchangeClient(mock_ccxt, dry_run=True)
+    client._market.fetch_ticker = MagicMock(
+        return_value={"bid": 0.24, "ask": 0.265, "last": 0.25}
+    )
+    out = client.maker_safe_limit_buy_price("ETH/USD", 0.24)
+    assert out is not None
+    assert out == pytest.approx(0.24)

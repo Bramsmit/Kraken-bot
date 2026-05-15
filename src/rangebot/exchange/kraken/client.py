@@ -9,6 +9,7 @@ import ccxt
 
 from rangebot.config.settings import (
     KRAKEN_MAX_POSITION_VALUE_USD,
+    MICRO_PRICE_EPS,
     kraken_dry_run_from_env,
 )
 from rangebot.exchange.base import ExchangeClient
@@ -51,6 +52,88 @@ class KrakenExchangeClient(ExchangeClient):
         except Exception as e:
             log.warning("get_latest_price %s: %s", symbol, e)
             return None
+
+    def _largest_limit_buy_below_ask(
+        self,
+        sym: str,
+        ask_raw: float,
+        ask_prec: float,
+    ) -> float | None:
+        ex = self._ex
+        m = ex.markets.get(sym) or {}
+        lim = (m.get("limits") or {}).get("price") or {}
+        try:
+            pmin = float(lim.get("min") or 0)
+        except (TypeError, ValueError):
+            pmin = 0.0
+        step = pmin or max(ask_prec * 1e-8, MICRO_PRICE_EPS * 1e-6)
+
+        for mult in (
+            1 - 1e-12,
+            1 - 1e-10,
+            1 - 1e-8,
+            1 - 1e-6,
+            1 - 1e-4,
+            0.999,
+            0.99,
+            0.95,
+            0.9,
+        ):
+            cand = float(ex.price_to_precision(sym, ask_raw * mult))
+            if MICRO_PRICE_EPS < cand < ask_prec:
+                return cand
+
+        cand = ask_prec
+        for _ in range(10_000):
+            cand -= step
+            if cand <= 0:
+                break
+            p = float(ex.price_to_precision(sym, cand))
+            if MICRO_PRICE_EPS < p < ask_prec:
+                return p
+        return None
+
+    def maker_safe_limit_buy_price(
+        self, symbol: str, desired: float
+    ) -> float | None:
+        """Never return a limit at or above the best ask (post prec.; avoids taker)."""
+        sym = norm_symbol(symbol)
+        try:
+            desired_p = float(self._ex.price_to_precision(sym, desired))
+        except Exception:
+            return None
+        try:
+            t = self._market.fetch_ticker(sym)
+            ask_raw = float(t.get("ask") or 0)
+        except Exception as e:
+            log.warning("maker_safe_limit_buy_price ticker %s: %s", sym, e)
+            return desired_p
+        if ask_raw <= 0:
+            return desired_p
+        try:
+            ask_p = float(self._ex.price_to_precision(sym, ask_raw))
+        except Exception:
+            return desired_p
+        if desired_p < ask_p - 1e-12:
+            return desired_p
+
+        capped = self._largest_limit_buy_below_ask(sym, ask_raw, ask_p)
+        if capped is None:
+            log.warning(
+                "maker_safe_limit_buy_price %s: geen geldige prijs onder ask=%s",
+                sym,
+                ask_p,
+            )
+            return None
+        if capped + 1e-12 < desired_p:
+            log.info(
+                "maker_safe_limit_buy_price %s: %.8f -> %.8f (ask prec=%s)",
+                sym,
+                desired_p,
+                capped,
+                ask_p,
+            )
+        return min(desired_p, capped)
 
     def get_balances(self) -> dict[str, Any]:
         try:

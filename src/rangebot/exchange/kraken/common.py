@@ -25,12 +25,10 @@ def balance_entry(balance: dict[str, Any], code: str) -> tuple[float, float]:
 def post_only_from_env() -> bool:
     import os
 
-    return os.environ.get("KRAKEN_POST_ONLY", "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
+    raw = os.environ.get("KRAKEN_POST_ONLY", "true").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        return False
+    return True
 
 
 def trade_fee_usd_from_ccxt(
