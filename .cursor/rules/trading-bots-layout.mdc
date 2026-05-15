@@ -11,6 +11,4 @@ alwaysApply: true
 - **`scripts/run_bot.py`** — `rangebot.main`.
 - **`tests/`** — Pytest.
 
-**Archief:** `_archive_not_kraken_relevant/` — o.a. `metrics/`, `docs/`, `exports/`, backtests, oude shims. Zie `ARCHIVE_REPORT.md` daarin.
-
 `BITVAVO_*`-feeconstanten in `settings` zijn historische namen voor maker/taker in journal/backtest (zelfde getallen).

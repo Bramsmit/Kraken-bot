@@ -19,6 +19,6 @@ python -m kraken.live_trader
 - Exchange: `rangebot.exchange.kraken` (ccxt).
 - State: `.kraken_trade_state.json`, `kraken_trades.jsonl`, `kraken_runs.jsonl`.
 
-## Backtests / handoffs (gearchiveerd)
+## Backtests (optioneel)
 
-Vroeger: `bot_range_1000/` en `range_strategy/` compat-shim. Die staan nu onder **`_archive_not_kraken_relevant/`**; niet nodig om deze entry te draaien.
+Vroeger aparte `bot_range_1000` / `range_strategy`-shims; niet nodig voor deze entry. Eventueel uit eerdere git commits terugzetten.

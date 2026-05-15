@@ -2,7 +2,7 @@
 
 Python spot bot: **daily range** op **Kraken** (USD-paren). Strategielogica in `src/rangebot/strategy/`; runtime via `kraken/` en `rangebot.main`.
 
-**Archief** (backtests, oude tooling, **metrics/docs/exports**): `_archive_not_kraken_relevant/` — zie `_archive_not_kraken_relevant/ARCHIVE_REPORT.md`.
+Oude backtests/m metrics/docs/exports stonden eerder in git onder `_archive_not_kraken_relevant/`; terughalen kan met `git checkout <commit> -- _archive_not_kraken_relevant` (bijv. vlak vóór verwijdering op `main`).
 
 ## Quick start
 
@@ -56,12 +56,12 @@ pip install -e .    # in gekloonde repo
 - **Cron (uur):** `0 * * * * cd /pad/na/repo && python3 -m kraken.live_trader >> /var/log/kraken-bot.log 2>&1`
 - **Continu:** `nohup python3 -m rangebot.live.run_loop >> /var/log/kraken-bot.log 2>&1 &`
 
-Uitgebreide deploy-/remote-notities stonden in `docs/DEPLOY.md` (nu onder **`_archive_not_kraken_relevant/docs/`**).
+(Zie git history voor oudere uitgebreide deploy-notities.)
 
 ## Telegram
 
 Zie `.env.example`: `TELEGRAM_*`, optioneel `TELEGRAM_*_KRAKEN` overrides.
 
-## Journal-exports & run-audit CLI
+## Journal-exports (optioneel)
 
-De scripts `metrics.export_all_trades` en `metrics.run_compare` staan gearchiveerd onder **`_archive_not_kraken_relevant/metrics/`**. Herstel die map naar `./metrics` als je ze weer lokaal wilt draaien.
+Oude export/`run_compare`-hulpscripts zaten in een verwijderde archiefmap; desnoods terugzetten uit eerdere commits via git.
