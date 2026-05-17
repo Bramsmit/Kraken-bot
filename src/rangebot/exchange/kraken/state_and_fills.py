@@ -22,6 +22,35 @@ from rangebot.utils.paths import repository_root
 log = logging.getLogger(__name__)
 
 
+def _stable_trade_id(
+    tr: dict[str, Any],
+    *,
+    pool_set: set[str] | None = None,
+) -> str | None:
+    """Unique id for dedup + notify persistence (synthetic when Kraken omits ``id``)."""
+    tid_raw = str(tr.get("id") or "").strip()
+    if tid_raw:
+        return tid_raw
+    sym = norm_symbol(tr.get("symbol") or "")
+    if pool_set is not None and sym and sym not in pool_set:
+        return None
+    ts_ms = tr.get("timestamp")
+    qty = float(tr.get("amount") or 0)
+    price = float(tr.get("price") or 0)
+    side = str(tr.get("side") or "").lower()
+    if (
+        sym
+        and side in ("buy", "sell")
+        and qty > 0
+        and price > 0
+        and ts_ms
+    ):
+        return (
+            f"noid:{sym}:{ts_ms}:{side}:{qty:.10f}:{price:.10f}"
+        )
+    return None
+
+
 def filter_kraken_usd_pool(
     client: ExchangeClient, pool: list[str]
 ) -> list[str]:
@@ -153,9 +182,9 @@ def check_and_notify_kraken_fills(
 
         dedup: dict[str, dict[str, Any]] = {}
         for tr in trades_raw:
-            tid = str(tr.get("id") or "")
-            if tid:
-                dedup[tid] = tr
+            tid_key = _stable_trade_id(tr, pool_set=pool_set)
+            if tid_key:
+                dedup[tid_key] = tr
         trades_sorted = sorted(
             dedup.values(), key=lambda x: x.get("timestamp") or 0
         )
@@ -168,12 +197,13 @@ def check_and_notify_kraken_fills(
         new_count = 0
 
         for tr in trades_sorted:
-            tid = str(tr.get("id") or "")
+            tid = _stable_trade_id(tr, pool_set=pool_set)
             if not tid or tid in notified_set:
                 continue
             sym = norm_symbol(tr.get("symbol") or "")
             if sym not in pool_set:
                 continue
+            ts_ms = tr.get("timestamp")
             qty = float(tr.get("amount") or 0)
             price = float(tr.get("price") or 0)
             if qty <= 0 or price <= 0:
@@ -181,7 +211,6 @@ def check_and_notify_kraken_fills(
             side = str(tr.get("side") or "").lower()
             if side not in ("buy", "sell"):
                 continue
-
             fee_usd = trade_fee_usd_from_ccxt(tr, symbol=sym, price=price)
             if fee_usd is not None:
                 cum_fees += fee_usd
@@ -240,7 +269,6 @@ def check_and_notify_kraken_fills(
                             "buy_fee_usd": max(0.0, prev_bf - buy_fee_this),
                         }
 
-            ts_ms = tr.get("timestamp")
             ts_iso = (
                 datetime.fromtimestamp(
                     ts_ms / 1000, tz=timezone.utc
@@ -308,12 +336,19 @@ def check_and_notify_kraken_fills(
             notified_set.add(tid)
             new_count += 1
 
-        if new_count:
-            save_kraken_state(
-                entries=entries,
-                notified_trade_ids=notified,
-                cumulative_kraken_fees_usd=cum_fees,
-            )
+            try:
+                save_kraken_state(
+                    entries=entries,
+                    notified_trade_ids=notified,
+                    cumulative_kraken_fees_usd=cum_fees,
+                )
+            except Exception as save_err:
+                log.error(
+                    "Kraken state na fill niet opgeslagen "
+                    "(Telegram-duplicaten mogelijk): %s",
+                    save_err,
+                )
+
         return new_count, entries
     except Exception as e:
         log.warning("Kraken fill-check: %s", e)

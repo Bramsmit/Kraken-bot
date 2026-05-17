@@ -52,6 +52,7 @@ from rangebot.exchange.kraken import (
     norm_symbol,
     save_kraken_state,
 )
+from rangebot.exchange.kraken.validation import OrderValidationError
 from rangebot.run_audit import KRAKEN_RUNS_JSONL, log_run_audit
 from rangebot.strategy.signals import (
     dry_run_from_env,
@@ -88,6 +89,11 @@ def bootstrap_cli_environment(repo_root: Path | None = None) -> None:
 
 bootstrap_cli_environment()
 log = logging.getLogger(__name__)
+
+
+def _is_kraken_below_minimum_order(exc: OrderValidationError) -> bool:
+    """Kraken/ccxt minimum amount or minimum cost shortfall."""
+    return "< minimum" in str(exc).lower()
 
 
 def run_once() -> dict:
@@ -320,19 +326,68 @@ def run_once() -> dict:
                             symbol,
                         )
                     else:
-                        submit_limit_sell_all_free(client, symbol, limit_sell)
-                        log.info(
-                            "  %s: Sell limit @ $%.4f (stop-ref $%.4f)",
-                            symbol,
-                            limit_sell,
-                            stop_price,
+                        min_amt, min_cost = client.limit_order_minimums(
+                            symbol
                         )
-                        if not existing_sell:
-                            send_telegram(
-                                f"📊 [Kraken] {symbol}: Sell limit @ "
-                                f"${limit_sell:.4f}"
+                        sell_notional = free_q * limit_sell
+                        below_amt = (
+                            min_amt is not None
+                            and free_q + 1e-12 < float(min_amt)
+                        )
+                        below_cost = (
+                            min_cost is not None
+                            and sell_notional + 1e-8 < float(min_cost)
+                        )
+                        if below_amt or below_cost:
+                            log.info(
+                                "  %s: Sell overgeslagen (stof onder "
+                                "Kraken-min): qty=%s (min_amt=%s) "
+                                "nom=$%.4f (min_cost=%s)",
+                                symbol,
+                                free_q,
+                                min_amt,
+                                sell_notional,
+                                min_cost,
                             )
-                            stats["placed"] += 1
+                            for o in open_orders:
+                                if o.get("side") == "sell":
+                                    try:
+                                        cancel_order_safe(
+                                            client,
+                                            str(o["id"]),
+                                            symbol,
+                                        )
+                                    except Exception:
+                                        pass
+                            stats["skipped"] += 1
+                        else:
+                            submit_limit_sell_all_free(
+                                client, symbol, limit_sell
+                            )
+                            log.info(
+                                "  %s: Sell limit @ $%.4f (stop-ref $%.4f)",
+                                symbol,
+                                limit_sell,
+                                stop_price,
+                            )
+                            if not existing_sell:
+                                send_telegram(
+                                    f"📊 [Kraken] {symbol}: Sell limit @ "
+                                    f"${limit_sell:.4f}"
+                                )
+                                stats["placed"] += 1
+                except OrderValidationError as e:
+                    if _is_kraken_below_minimum_order(e):
+                        log.info(
+                            "  %s: Sell overgeslagen (stof): %s",
+                            symbol,
+                            e,
+                        )
+                    else:
+                        log.warning("  %s: sell fout: %s", symbol, e)
+                        send_telegram(
+                            f"❌ [Kraken] {symbol}: sell-fout: {e}"
+                        )
                 except Exception as e:
                     log.warning("  %s: sell fout: %s", symbol, e)
                     send_telegram(f"❌ [Kraken] {symbol}: sell-fout: {e}")

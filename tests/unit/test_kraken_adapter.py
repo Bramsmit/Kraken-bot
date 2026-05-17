@@ -10,6 +10,8 @@ import pytest
 from rangebot.config.settings import kraken_dry_run_from_env
 from rangebot.exchange.kraken.client import KrakenExchangeClient, create_kraken_client
 from rangebot.exchange.kraken.common import post_only_from_env
+from rangebot.exchange.kraken.state_and_fills import _stable_trade_id
+from rangebot.exchange.kraken.validation import kraken_limit_minimums
 from rangebot.exchange.kraken.transport import retry_ccxt
 from rangebot.exchange.kraken.validation import (
     OrderValidationError,
@@ -167,11 +169,44 @@ def test_maker_safe_clamps_buy_at_or_above_ask(mock_ccxt: MagicMock) -> None:
     assert out < 0.26
 
 
-def test_maker_safe_unchanged_when_below_ask(mock_ccxt: MagicMock) -> None:
+def test_kraken_limit_minimums_from_market(mock_ccxt: MagicMock) -> None:
+    a, c = kraken_limit_minimums(mock_ccxt, "ETH/USD")
+    assert a == pytest.approx(0.01)
+    assert c == pytest.approx(5.0)
+
+
+def test_client_limit_order_minimums_delegates(mock_ccxt: MagicMock) -> None:
     client = KrakenExchangeClient(mock_ccxt, dry_run=True)
-    client._market.fetch_ticker = MagicMock(
-        return_value={"bid": 0.24, "ask": 0.265, "last": 0.25}
+    assert client.limit_order_minimums("ETH/USD") == (0.01, 5.0)
+
+
+def test_stable_trade_id_uses_exchange_id() -> None:
+    t = _stable_trade_id(
+        {"id": "TX1", "symbol": "ETH/USD", "side": "sell"},
+        pool_set={"ETH/USD"},
     )
-    out = client.maker_safe_limit_buy_price("ETH/USD", 0.24)
-    assert out is not None
-    assert out == pytest.approx(0.24)
+    assert t == "TX1"
+
+
+def test_stable_trade_id_synthetic_without_id() -> None:
+    t = _stable_trade_id(
+        {
+            "id": "",
+            "symbol": "ETH/USD",
+            "timestamp": 1_700_000_000_000,
+            "side": "sell",
+            "amount": 1.5,
+            "price": 2000.0,
+        },
+        pool_set={"ETH/USD"},
+    )
+    assert t is not None
+    assert t.startswith("noid:ETH/USD:")
+
+
+def test_stable_trade_id_respects_pool() -> None:
+    t = _stable_trade_id(
+        {"id": "", "symbol": "DOGE/USD", "timestamp": 1000, "side": "buy", "amount": 1, "price": 0.1},
+        pool_set={"ETH/USD"},
+    )
+    assert t is None

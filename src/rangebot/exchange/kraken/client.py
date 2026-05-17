@@ -20,6 +20,7 @@ from rangebot.exchange.kraken.order_execution import KrakenOrderExecution
 from rangebot.exchange.kraken.transport import build_ccxt_kraken
 from rangebot.exchange.kraken.validation import (
     OrderValidationError,
+    kraken_limit_minimums,
     validate_limit_order_placement,
 )
 
@@ -52,6 +53,11 @@ class KrakenExchangeClient(ExchangeClient):
         except Exception as e:
             log.warning("get_latest_price %s: %s", symbol, e)
             return None
+
+    def limit_order_minimums(
+        self, symbol: str
+    ) -> tuple[float | None, float | None]:
+        return kraken_limit_minimums(self._ex, symbol)
 
     def _largest_limit_buy_below_ask(
         self,

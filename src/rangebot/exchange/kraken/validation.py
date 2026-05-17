@@ -38,6 +38,15 @@ def _f(x: Any) -> float | None:
         return None
 
 
+def kraken_limit_minimums(
+    ex: ccxt.kraken, symbol: str
+) -> tuple[float | None, float | None]:
+    """Minimum base amount and minimum quote notional for a limit order, if known."""
+    sym = norm_symbol(symbol)
+    min_amt, _max_amt, min_cost, _max_cost = _market_limits(ex, sym)
+    return min_amt, min_cost
+
+
 def validate_limit_order_placement(
     ex: ccxt.kraken,
     balances: dict[str, Any],

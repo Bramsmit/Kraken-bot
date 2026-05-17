@@ -33,6 +33,13 @@ class ExchangeClient(ABC):
         _ = symbol
         return float(desired)
 
+    def limit_order_minimums(
+        self, symbol: str
+    ) -> tuple[float | None, float | None]:
+        """Minimum size on venue: ``(min_base_amount, min_quote_cost)`` if known."""
+        _ = symbol
+        return None, None
+
     @abstractmethod
     def get_balances(self) -> dict[str, Any]:
         """Unified balances (ccxt-style ``{code: {free, used, total}}``)."""
