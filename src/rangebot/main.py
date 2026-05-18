@@ -21,7 +21,6 @@ from rangebot.config.settings import (
     ORDER_UPDATE_THRESHOLD,
     RANGE_CRYPTO_ESTIMATED_MAKER_ROUND_TRIP_PCT,
     RANGE_CRYPTO_ROUND_TRIP_FIXED_USD,
-    RANGE_MIN_ORDER_REF_USD,
     SYMBOL_POOL,
     SYMBOLS_ACTIVE,
     required_min_spread_fraction_crypto_usd,
