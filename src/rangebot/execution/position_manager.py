@@ -6,7 +6,12 @@ import logging
 from decimal import Decimal
 from typing import Any
 
-from rangebot.config.settings import MIN_SELLABLE_CRYPTO_QTY
+from rangebot.config.settings import (
+    BUYING_POWER_PER_SYMBOL_FRACTION,
+    MIN_SELLABLE_CRYPTO_QTY,
+    ORDER_ESTIMATE_NOTIONAL_FRACTION,
+    RANGE_MIN_ORDER_REF_USD,
+)
 from rangebot.exchange.base import ExchangeClient
 
 log = logging.getLogger(__name__)
@@ -51,6 +56,53 @@ def estimate_portfolio_usd(
             except Exception as e:  # noqa: BLE001
                 log.warning("price %s: %s", sym, e)
     return total
+
+
+def ref_notional_for_range_selection(
+    client: ExchangeClient,
+    kr_pool: list[str],
+    *,
+    symbols_active: int,
+) -> tuple[float, float]:
+    """
+    ``ref_usd`` for :func:`select_top_symbols_for_range` plus portfolio equity.
+
+    Scale is **total portfolio** in ``kr_pool`` (cash + marked-to-market bases)
+    divided by ``symbols_active``, capped by available cash on the estimate path.
+    """
+    equity = estimate_portfolio_usd(client, kr_pool)
+    cash = get_buying_power_usd(client)
+    n = max(1, int(symbols_active))
+    cap_target = (equity / n) * BUYING_POWER_PER_SYMBOL_FRACTION
+    est_order_usd = min(
+        cap_target,
+        max(0.0, cash * ORDER_ESTIMATE_NOTIONAL_FRACTION),
+    )
+    if est_order_usd > 0:
+        ref_usd = max(RANGE_MIN_ORDER_REF_USD, est_order_usd)
+    else:
+        ref_usd = max(RANGE_MIN_ORDER_REF_USD, cap_target)
+    return ref_usd, equity
+
+
+def capital_per_active_symbol_usd(
+    *,
+    portfolio_equity_usd: float,
+    free_quote_usd: float,
+    n_symbols: int,
+) -> float:
+    """
+    Target buy notional per selected symbol:
+
+    ``min( (equity/n)×fraction , cash/n )`` so each slot may use up to 1/n of
+    total portfolio (mark-to-market), but never more than a fair share of USD.
+    """
+    if n_symbols <= 0:
+        return 0.0
+    n = float(n_symbols)
+    slot = max(0.0, portfolio_equity_usd) / n * BUYING_POWER_PER_SYMBOL_FRACTION
+    cash_cap = max(0.0, free_quote_usd) / n
+    return min(slot, cash_cap)
 
 
 def get_positions_map(

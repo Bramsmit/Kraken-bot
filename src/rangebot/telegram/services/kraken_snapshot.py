@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from rangebot.config.settings import (
-    RANGE_MIN_ORDER_REF_USD,
     SYMBOL_POOL,
     SYMBOLS_ACTIVE,
     kraken_dry_run_from_env,
@@ -20,6 +19,7 @@ from rangebot.execution.position_manager import (
     estimate_portfolio_usd,
     get_buying_power_usd,
     get_positions_map,
+    ref_notional_for_range_selection,
 )
 from rangebot.strategy.signals import select_top_symbols_for_range
 
@@ -56,13 +56,8 @@ class KrakenTelegramService:
         kr_pool = filter_kraken_usd_pool(client, SYMBOL_POOL)
         if not kr_pool:
             return "Geen bruikbare markten; posities onbekend."
-        cash_pre = get_buying_power_usd(client)
-        cap_target = (cash_pre / SYMBOLS_ACTIVE) * 0.995
-        est_order_usd = min(cap_target, max(0.0, cash_pre * 0.99))
-        ref_usd = (
-            max(RANGE_MIN_ORDER_REF_USD, est_order_usd)
-            if est_order_usd > 0
-            else cap_target
+        ref_usd, _ = ref_notional_for_range_selection(
+            client, kr_pool, symbols_active=SYMBOLS_ACTIVE
         )
         symbols, _levels = select_top_symbols_for_range(
             client, kr_pool, SYMBOLS_ACTIVE, ref_usd
@@ -81,13 +76,8 @@ class KrakenTelegramService:
         kr_pool = filter_kraken_usd_pool(client, SYMBOL_POOL)
         if not kr_pool:
             return "Geen markten; geen orders weergegeven."
-        cash_pre = get_buying_power_usd(client)
-        cap_target = (cash_pre / SYMBOLS_ACTIVE) * 0.995
-        est_order_usd = min(cap_target, max(0.0, cash_pre * 0.99))
-        ref_usd = (
-            max(RANGE_MIN_ORDER_REF_USD, est_order_usd)
-            if est_order_usd > 0
-            else cap_target
+        ref_usd, _ = ref_notional_for_range_selection(
+            client, kr_pool, symbols_active=SYMBOLS_ACTIVE
         )
         symbols, _ = select_top_symbols_for_range(
             client, kr_pool, SYMBOLS_ACTIVE, ref_usd
@@ -112,13 +102,8 @@ class KrakenTelegramService:
         kr_pool = filter_kraken_usd_pool(client, SYMBOL_POOL)
         if not kr_pool:
             return "⚠️ Kraken: geen bruikbare USD-markten in pool."
-        cash_pre = get_buying_power_usd(client)
-        cap_target = (cash_pre / SYMBOLS_ACTIVE) * 0.995
-        est_order_usd = min(cap_target, max(0.0, cash_pre * 0.99))
-        ref_usd = (
-            max(RANGE_MIN_ORDER_REF_USD, est_order_usd)
-            if est_order_usd > 0
-            else cap_target
+        ref_usd, _ = ref_notional_for_range_selection(
+            client, kr_pool, symbols_active=SYMBOLS_ACTIVE
         )
         symbols, levels = select_top_symbols_for_range(
             client, kr_pool, SYMBOLS_ACTIVE, ref_usd

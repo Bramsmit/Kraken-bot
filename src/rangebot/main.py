@@ -10,13 +10,11 @@ from decimal import Decimal
 from pathlib import Path
 
 from rangebot.config.settings import (
-    BUYING_POWER_PER_SYMBOL_FRACTION,
     MAIN_RUN_MAX_RETRIES,
     MAIN_RUN_RETRY_WAIT_BASE_SEC,
     MIN_CAPITAL_PER_ASSET_USD,
     MIN_SELLABLE_CRYPTO_QTY,
     MICRO_PRICE_EPS,
-    ORDER_ESTIMATE_NOTIONAL_FRACTION,
     ORDER_MAX_AGE_HOURS,
     ORDER_REPLACE_DELAY_SEC,
     ORDER_STALE_PRICE_THRESHOLD,
@@ -42,6 +40,8 @@ from rangebot.execution.position_manager import (
     get_positions_map,
     get_qty_for_symbol,
     persist_entries_from_balances,
+    capital_per_active_symbol_usd,
+    ref_notional_for_range_selection,
 )
 from rangebot.execution.risk_manager import stop_price_below_entry
 from rangebot.exchange.kraken import (
@@ -125,15 +125,8 @@ def run_once() -> dict:
         )
         return {}
 
-    buying_power_pre = get_buying_power_usd(client)
-    cap_target = (buying_power_pre / SYMBOLS_ACTIVE) * BUYING_POWER_PER_SYMBOL_FRACTION
-    est_order_usd = min(
-        cap_target, max(0.0, buying_power_pre * ORDER_ESTIMATE_NOTIONAL_FRACTION)
-    )
-    ref_usd = (
-        max(RANGE_MIN_ORDER_REF_USD, est_order_usd)
-        if est_order_usd > 0
-        else cap_target
+    ref_usd, _ = ref_notional_for_range_selection(
+        client, kr_pool, symbols_active=SYMBOLS_ACTIVE
     )
 
     symbols, levels = select_top_symbols_for_range(
@@ -166,8 +159,13 @@ def run_once() -> dict:
             mid_prices[s] = mp
 
     positions = get_positions_map(client, symbols, entries_after_fills)
-    buying_power = get_buying_power_usd(client)
-    capital_per = buying_power / len(symbols) if symbols else 0.0
+    portfolio_equity = estimate_portfolio_usd(client, kr_pool)
+    free_usd = get_buying_power_usd(client)
+    capital_per = capital_per_active_symbol_usd(
+        portfolio_equity_usd=portfolio_equity,
+        free_quote_usd=free_usd,
+        n_symbols=len(symbols),
+    )
 
     stats = {"placed": 0, "updated": 0, "unchanged": 0, "skipped": 0}
 
@@ -178,8 +176,9 @@ def run_once() -> dict:
         required_min_spread_fraction_crypto_usd(ref_usd) * 100,
     )
     log.info(
-        "Buying power USD: $%.2f | Per asset: $%.2f | DRY_RUN=%s",
-        buying_power,
+        "Portfolio ~ $%.2f | Vrije USD $%.2f | Per slot (buy max) $%.2f | DRY_RUN=%s",
+        portfolio_equity,
+        free_usd,
         capital_per,
         dry,
     )

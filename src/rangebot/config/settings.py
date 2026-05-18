@@ -21,7 +21,8 @@ SYMBOLS_ACTIVE = 3
 # Voor backtest: eerste N uit pool (zelfde subset als live)
 SYMBOLS = SYMBOL_POOL[:SYMBOLS_ACTIVE]
 
-# Kapitaal
+# Kapitaal (backtest / documentatie). Live sizing gebruikt
+# ``estimate_portfolio_usd(SYMBOL_POOL) / SYMBOLS_ACTIVE`` i.p.v. dit getal.
 START_CAPITAL = 500
 # verdeel over actieve symbolen
 CAPITAL_PER_ASSET = START_CAPITAL / SYMBOLS_ACTIVE
