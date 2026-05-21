@@ -9,6 +9,12 @@ on:
   schedule:
     - cron: "0 * * * *"
   workflow_dispatch:
+    inputs:
+      clean_slate:
+        description: Annuleer open orders en reset trade state (eenmalig)
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: kraken-hourly-trade
@@ -39,6 +45,13 @@ jobs:
 
       - name: Install dependencies
         run: pip install -e .
+
+      - name: Clean slate (handmatige run)
+        if: github.event_name == 'workflow_dispatch' && inputs.clean_slate
+        env:
+          KRAKEN_API_KEY: ${{ secrets.KRAKEN_API_KEY }}
+          KRAKEN_API_SECRET: ${{ secrets.KRAKEN_API_SECRET }}
+        run: python -m rangebot.live.clean_slate
 
       # Live limits: set repository variable KRAKEN_DRY_RUN=false. Unset/empty/true = dry-run (default in app).
       - name: Run Kraken range bot
