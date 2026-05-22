@@ -65,7 +65,7 @@ jobs:
         run: python -m kraken.live_trader
 
       - name: Upload Kraken journals
-        if: success()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: kraken-journals-${{ github.run_id }}

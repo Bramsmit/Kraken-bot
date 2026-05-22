@@ -605,7 +605,8 @@ def run_once() -> dict:
         filename=KRAKEN_RUNS_JSONL,
     )
 
-    send_telegram(f"📋 {summary}")
+    if new_trades or stats["placed"] or stats["updated"]:
+        send_telegram(f"📋 {summary}")
     return stats
 
 

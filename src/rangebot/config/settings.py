@@ -57,8 +57,9 @@ RANGE_MIN_ORDER_REF_USD = 5.0
 RANGE_CRYPTO_FEE_FIXED_PER_SIDE_USD = 0.25
 RANGE_CRYPTO_ROUND_TRIP_FIXED_USD = RANGE_CRYPTO_FEE_FIXED_PER_SIDE_USD * 2
 RANGE_CRYPTO_ESTIMATED_MAKER_ROUND_TRIP_PCT = BITVAVO_MAKER_FEE_RATE * 2
-# Journal/fills: uren terug naar trades (≥ interval Actions + marge).
-FILLED_ORDERS_LOOKBACK_HOURS = 72
+# Journal/fills: uren terug naar trades. 4u is ruim genoeg voor uurlijkse runs;
+# kort genoeg om bij state-verlies slechts 1 run aan fills opnieuw te melden.
+FILLED_ORDERS_LOOKBACK_HOURS = 4
 
 import os as _os_kraken_adapter
 
