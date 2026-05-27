@@ -2,7 +2,11 @@ node_modules
 dist
 .DS_Store
 .env
+.env.local
 .cursor/mcp.json
+.venv/
+.venv-ci/
+venv/
 
 .kraken_trade_state.json
 .kraken_bot_control.json
