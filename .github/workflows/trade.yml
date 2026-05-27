@@ -30,6 +30,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Pip-cache: hergebruikt geïnstalleerde packages zolang pyproject.toml niet wijzigt.
+      # Bespaart ~2–3 min per run (ccxt + pandas hoeven niet opnieuw gedownload te worden).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # Trade-state cache: persisteert notified_trade_ids en entries tussen runs.
       - uses: actions/cache@v4
         with:
           path: |
@@ -38,10 +47,6 @@ jobs:
             kraken_runs.jsonl
             kraken_bot_trades.jsonl
           key: kraken-trade-state-${{ runner.os }}
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
 
       - name: Install dependencies
         run: pip install -e .
@@ -75,7 +80,7 @@ jobs:
             kraken_bot_trades.jsonl
             .kraken_trade_state.json
           if-no-files-found: ignore
-          retention-days: 14
+          retention-days: 7
 
       - name: Notify on failure
         if: failure()
