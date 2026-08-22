@@ -38,15 +38,15 @@ def _write_stored_kraken_nonce(value: int) -> None:
     path.write_text(str(value), encoding="utf-8")
 
 
-def _kraken_nonce_now() -> int:
-    """Microseconds since epoch — finer grain than ms, avoids parallel-run collisions."""
-    return int(time.time() * 1_000_000)
+def _kraken_nonce_now_ms() -> int:
+    """Kraken expects an always-increasing nonce; milliseconds since epoch is standard."""
+    return int(time.time() * 1000)
 
 
 def _normalize_stored_kraken_nonce(last: int) -> int:
-    """Migrate legacy millisecond nonces stored before the microsecond switch."""
-    if 0 < last < 10**14:
-        return last * 1000
+    """Convert accidental microsecond-scale stored values back to milliseconds."""
+    if last > 10**14:
+        return last // 1000
     return last
 
 
@@ -58,20 +58,20 @@ def next_kraken_nonce() -> int:
     CI, local runs, and MCP requires a file-backed counter that always moves
     forward.
     """
-    now = _kraken_nonce_now()
+    now_ms = _kraken_nonce_now_ms()
     last = _normalize_stored_kraken_nonce(_read_stored_kraken_nonce())
-    n = max(last + 1, now)
+    n = max(last + 1, now_ms)
     _write_stored_kraken_nonce(n)
     return n
 
 
-def bump_kraken_nonce_after_invalid(*, ahead_us: int = 5_000_000) -> None:
+def bump_kraken_nonce_after_invalid(*, ahead_ms: int = 60_000) -> None:
     """Jump nonce forward after EAPI:Invalid nonce (other client used the key)."""
-    now = _kraken_nonce_now()
+    now_ms = _kraken_nonce_now_ms()
     last = _normalize_stored_kraken_nonce(_read_stored_kraken_nonce())
-    _write_stored_kraken_nonce(max(last + 1_000_000, now + ahead_us))
+    _write_stored_kraken_nonce(max(last + ahead_ms, now_ms + ahead_ms))
     log.warning(
-        "Kraken nonce bumped naar %d na InvalidNonce",
+        "Kraken nonce bumped naar %d ms na InvalidNonce",
         _read_stored_kraken_nonce(),
     )
 
@@ -105,6 +105,7 @@ def build_ccxt_kraken() -> ccxt.kraken:
             "secret": secret,
             "enableRateLimit": True,
             "nonce": next_kraken_nonce,
+            "options": {"adjustForTimeDifference": True},
         }
     )
     ex.load_markets()
