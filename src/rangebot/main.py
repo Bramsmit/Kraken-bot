@@ -11,6 +11,7 @@ from pathlib import Path
 
 from rangebot.config.settings import (
     KRAKEN_MAX_DEPLOYED_PCT,
+    KRAKEN_USE_FIXED_FEE_IN_SPREAD_GATE,
     MAIN_RUN_MAX_RETRIES,
     MAIN_RUN_RETRY_WAIT_BASE_SEC,
     MIN_CAPITAL_PER_ASSET_USD,
@@ -549,10 +550,11 @@ def run_once() -> dict:
                     )
                     gross_usd_est = capital_per * spread_frac
                     fee_usd_est = (
-                        RANGE_CRYPTO_ROUND_TRIP_FIXED_USD
-                        + capital_per
+                        capital_per
                         * RANGE_CRYPTO_ESTIMATED_MAKER_ROUND_TRIP_PCT
                     )
+                    if KRAKEN_USE_FIXED_FEE_IN_SPREAD_GATE:
+                        fee_usd_est += RANGE_CRYPTO_ROUND_TRIP_FIXED_USD
                     if gross_usd_est < fee_usd_est:
                         log.warning(
                             "  %s: Buy skip bruto $%.2f < fees $%.2f",

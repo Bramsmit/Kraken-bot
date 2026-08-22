@@ -52,16 +52,26 @@ BITVAVO_FEE_BUY_RATE = BITVAVO_MAKER_FEE_RATE
 BITVAVO_FEE_SELL_LIMIT_RATE = BITVAVO_MAKER_FEE_RATE
 BITVAVO_FEE_SELL_TAKER_RATE = BITVAVO_TAKER_FEE_RATE
 
-# USD-range bot: %-maker + vaste USD per zijde (kleine orders). Tier zelf afstemmen.
+# USD-range bot: %-maker + vaste USD per zijde (journal/backtest legacy). Tier zelf afstemmen.
 RANGE_MIN_ORDER_REF_USD = 5.0
 RANGE_CRYPTO_FEE_FIXED_PER_SIDE_USD = 0.25
 RANGE_CRYPTO_ROUND_TRIP_FIXED_USD = RANGE_CRYPTO_FEE_FIXED_PER_SIDE_USD * 2
-RANGE_CRYPTO_ESTIMATED_MAKER_ROUND_TRIP_PCT = BITVAVO_MAKER_FEE_RATE * 2
+
+import os as _os_kraken_adapter
+
+# Gemeten live (aug 2026); Tier ~2 maker. Pas aan na volume-tier wijziging.
+KRAKEN_MAKER_FEE_RATE = float(
+    _os_kraken_adapter.environ.get("KRAKEN_MAKER_FEE_RATE", "0.0030")
+)
+KRAKEN_TAKER_FEE_RATE = float(
+    _os_kraken_adapter.environ.get("KRAKEN_TAKER_FEE_RATE", "0.0040")
+)
+# Geen vaste USD-fee in spread-gate voor Kraken live.
+KRAKEN_USE_FIXED_FEE_IN_SPREAD_GATE = False
+RANGE_CRYPTO_ESTIMATED_MAKER_ROUND_TRIP_PCT = KRAKEN_MAKER_FEE_RATE * 2
 # Journal/fills: uren terug naar trades. 4u is ruim genoeg voor uurlijkse runs;
 # kort genoeg om bij state-verlies slechts 1 run aan fills opnieuw te melden.
 FILLED_ORDERS_LOOKBACK_HOURS = 4
-
-import os as _os_kraken_adapter
 
 _km_pos = _os_kraken_adapter.environ.get(
     "KRAKEN_MAX_POSITION_VALUE_USD", ""
@@ -94,16 +104,13 @@ def kraken_dry_run_from_env() -> bool:
 
 def required_min_spread_fraction_crypto_usd(ref_notional_usd: float) -> float:
     """Min. relatieve spread (sell vs buy); fee-model uit :mod:`rangebot.config.settings`."""
-    ref = (
-        float(ref_notional_usd)
-        if ref_notional_usd and ref_notional_usd > 0
-        else RANGE_MIN_ORDER_REF_USD
-    )
-    ref = max(RANGE_MIN_ORDER_REF_USD, ref)
-    return (
-        max(MIN_SPREAD_PCT, RANGE_CRYPTO_ROUND_TRIP_FIXED_USD / ref)
-        + RANGE_CRYPTO_ESTIMATED_MAKER_ROUND_TRIP_PCT
-    )
+    ref = max(RANGE_MIN_ORDER_REF_USD, float(ref_notional_usd or 0))
+    pct = KRAKEN_MAKER_FEE_RATE * 2
+    extra_margin = 0.002
+    if KRAKEN_USE_FIXED_FEE_IN_SPREAD_GATE:
+        fixed = RANGE_CRYPTO_ROUND_TRIP_FIXED_USD / ref
+        return max(MIN_SPREAD_PCT, fixed) + pct + extra_margin
+    return max(MIN_SPREAD_PCT, pct + extra_margin)
 
 
 # Journal/Telegram: vaste USD per fill (default = zijde hierboven).

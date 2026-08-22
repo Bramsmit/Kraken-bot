@@ -253,6 +253,10 @@ def check_and_notify_kraken_fills(
                     entry_price_for_log = entry if entry > 0 else None
                     frac = min(1.0, qty / prev_qty) if prev_qty > 0 else 1.0
                     buy_fee_this = prev_bf * frac
+                    if prev_bf <= 0 and entry > 0:
+                        log.info(
+                            "%s: buy_fee unknown (legacy entry)", sym
+                        )
 
                     if entry > 0:
                         gross = (price - entry) * qty
