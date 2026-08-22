@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 from rangebot.config.settings import (
-    MIN_SELLABLE_CRYPTO_QTY,
     kraken_dry_run_from_env,
     required_min_spread_fraction_crypto_usd,
 )
 from rangebot.data.market_data import fetch_symbol_rows_for_pool
 from rangebot.exchange.base import ExchangeClient
-from rangebot.execution.position_manager import get_qty_for_symbol
+from rangebot.execution.position_manager import get_qty_for_symbol, is_tradable_position
 from rangebot.strategy.range_strategy import (
     build_levels_scored_from_symbol_rows,
     levels_passing_spread,
@@ -23,11 +22,15 @@ def dry_run_from_env() -> bool:
 
 
 def symbols_with_balance(client: ExchangeClient, pool: list[str]) -> set[str]:
-    """Symbols in pool with free base above dust threshold."""
+    """Symbols in pool with tradable notional (above dust fee floor)."""
     out: set[str] = set()
     for sym in pool:
         qf, _ = get_qty_for_symbol(client, sym)
-        if qf > float(MIN_SELLABLE_CRYPTO_QTY):
+        try:
+            ref_px = client.get_latest_price(sym)
+        except Exception:
+            continue
+        if ref_px and is_tradable_position(qf, float(ref_px)):
             out.add(sym)
     return out
 

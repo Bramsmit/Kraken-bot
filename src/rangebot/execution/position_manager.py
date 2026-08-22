@@ -8,6 +8,7 @@ from typing import Any
 
 from rangebot.config.settings import (
     BUYING_POWER_PER_SYMBOL_FRACTION,
+    KRAKEN_MIN_POSITION_NOTIONAL_USD,
     MIN_SELLABLE_CRYPTO_QTY,
     ORDER_ESTIMATE_NOTIONAL_FRACTION,
     RANGE_MIN_ORDER_REF_USD,
@@ -15,6 +16,13 @@ from rangebot.config.settings import (
 from rangebot.exchange.base import ExchangeClient
 
 log = logging.getLogger(__name__)
+
+
+def is_tradable_position(qty: float, ref_price: float) -> bool:
+    """True when free qty is above dust and notional meets the fee floor."""
+    if qty <= 0 or Decimal(str(qty)) < MIN_SELLABLE_CRYPTO_QTY:
+        return False
+    return qty * float(ref_price or 0) >= KRAKEN_MIN_POSITION_NOTIONAL_USD
 
 
 def _balance_entry(balance: dict[str, Any], code: str) -> tuple[float, float]:
@@ -132,7 +140,8 @@ def persist_entries_from_balances(
         free_q, _ = get_qty_for_symbol(client, sym)
         if free_q <= 0:
             continue
-        if Decimal(str(free_q)) < MIN_SELLABLE_CRYPTO_QTY:
+        ref_px = float(mid_prices.get(sym) or 0)
+        if not is_tradable_position(free_q, ref_px):
             continue
         mem = entries_memory.get(sym)
         if mem and float(mem.get("entry") or 0) > 0:

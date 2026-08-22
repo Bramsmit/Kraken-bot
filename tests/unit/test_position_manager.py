@@ -8,6 +8,7 @@ import pytest
 
 from rangebot.execution.position_manager import (
     capital_per_active_symbol_usd,
+    is_tradable_position,
     ref_notional_for_range_selection,
 )
 
@@ -47,4 +48,21 @@ def test_ref_notional_uses_equity_over_cash_scale() -> None:
     )
     assert equity == pytest.approx(120.0)
     assert ref == pytest.approx(59.7)
+
+
+def test_is_tradable_position_rejects_dust_notional() -> None:
+    assert is_tradable_position(0.106, 1.50) is False  # ~$0.16
+
+
+def test_is_tradable_position_accepts_real_position() -> None:
+    assert is_tradable_position(1.0, 30.0) is True
+
+
+def test_buy_slots_one_free_slot_gets_full_cash() -> None:
+    c = capital_per_active_symbol_usd(
+        portfolio_equity_usd=402.0,
+        free_quote_usd=402.0,
+        n_symbols=1,  # buy_slots=1
+    )
+    assert c == pytest.approx(402.0 / 1 * 0.995)
 

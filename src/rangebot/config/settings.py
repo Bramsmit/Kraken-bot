@@ -73,6 +73,14 @@ try:
 except ValueError:
     KRAKEN_MAX_POSITION_VALUE_USD = None
 
+KRAKEN_MIN_POSITION_NOTIONAL_USD = (
+    RANGE_CRYPTO_ROUND_TRIP_FIXED_USD / MIN_SPREAD_PCT
+)  # $25 bij defaults
+
+KRAKEN_MAX_DEPLOYED_PCT = float(
+    _os_kraken_adapter.environ.get("KRAKEN_MAX_DEPLOYED_PCT", "0.45")
+)
+
 
 def kraken_dry_run_from_env() -> bool:
     """Default True (safe): set ``KRAKEN_DRY_RUN=false`` for live orders."""
