@@ -40,8 +40,12 @@ def select_top_symbols_for_range(
     pool: list[str],
     n: int,
     ref_notional_usd: float,
-) -> tuple[list[str], dict[str, tuple[float, float]]]:
-    """Pick top-N by score, always keeping symbols with balance (same as before)."""
+) -> tuple[list[str], dict[str, tuple[float, float]], dict[str, tuple[float, float, float]]]:
+    """Pick top-N by score, always keeping symbols with balance (same as before).
+
+    Returns ``(selected, levels, levels_scored)`` where ``levels_scored`` maps each
+    pool symbol that passed data/spread gates to ``(buy, sell, score)``.
+    """
     min_spread_frac = required_min_spread_fraction_crypto_usd(ref_notional_usd)
     rows_map = fetch_symbol_rows_for_pool(client, pool)
     levels_scored = build_levels_scored_from_symbol_rows(
@@ -58,7 +62,7 @@ def select_top_symbols_for_range(
             lv = levels_passing_spread(rows, min_spread_frac)
             if lv:
                 levels[sym] = lv
-    return selected, levels
+    return selected, levels, levels_scored
 
 
 select_top_symbols_kraken = select_top_symbols_for_range

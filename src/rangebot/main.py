@@ -104,6 +104,38 @@ def _is_kraken_below_minimum_order(exc: OrderValidationError) -> bool:
     return "< minimum" in str(exc).lower()
 
 
+def _log_and_build_selection_debug(
+    kr_pool: list[str],
+    levels_scored: dict[str, tuple[float, float, float]],
+    selected: list[str],
+) -> dict[str, dict]:
+    """Log per-pool symbol selection scores; return audit payload."""
+    log.info("Symbol-selectie (pool):")
+    debug: dict[str, dict] = {}
+    selected_set = set(selected)
+    for sym in kr_pool:
+        if sym not in levels_scored:
+            log.info("  %s: niet in levels_scored (data/spread)", sym)
+            debug[sym] = {"in_levels_scored": False, "selected": sym in selected_set}
+        else:
+            buy, sell, score = levels_scored[sym]
+            spread_pct = (sell / buy - 1) * 100 if buy > 0 else 0.0
+            log.info(
+                "  %s: score=%.4f spread=%.2f%%%s",
+                sym,
+                score,
+                spread_pct,
+                "" if sym in selected_set else " (niet geselecteerd)",
+            )
+            debug[sym] = {
+                "in_levels_scored": True,
+                "score": round(score, 4),
+                "spread_pct": round(spread_pct, 2),
+                "selected": sym in selected_set,
+            }
+    return debug
+
+
 def run_once() -> dict:
     """
     Single scheduled pass: venue connection, symbol selection, fill reconcile, limit upkeep.
@@ -137,9 +169,10 @@ def run_once() -> dict:
         client, kr_pool, symbols_active=SYMBOLS_ACTIVE
     )
 
-    symbols, levels = select_top_symbols_for_range(
+    symbols, levels, levels_scored = select_top_symbols_for_range(
         client, kr_pool, SYMBOLS_ACTIVE, ref_usd
     )
+    selection_debug = _log_and_build_selection_debug(kr_pool, levels_scored, symbols)
     if not symbols:
         log.warning("Geen symbolen geselecteerd")
         send_telegram("⚠️ Kraken: geen symbolen geselecteerd uit pool")
@@ -148,6 +181,7 @@ def run_once() -> dict:
                 "bot": "kraken_range",
                 "event": "no_symbols_selected",
                 "dry_run": dry,
+                "selection_debug": selection_debug,
             },
             filename=KRAKEN_RUNS_JSONL,
         )
@@ -690,6 +724,7 @@ def run_once() -> dict:
             else 0,
             "symbols_selected": list(symbols),
             "symbols_held": sorted(held),
+            "selection_debug": selection_debug,
             "summary_text": summary,
             "kraken_pool": [norm_symbol(x) for x in kr_pool],
         },

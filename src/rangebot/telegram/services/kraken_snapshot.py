@@ -59,7 +59,7 @@ class KrakenTelegramService:
         ref_usd, _ = ref_notional_for_range_selection(
             client, kr_pool, symbols_active=SYMBOLS_ACTIVE
         )
-        symbols, _levels = select_top_symbols_for_range(
+        symbols, _levels, _ = select_top_symbols_for_range(
             client, kr_pool, SYMBOLS_ACTIVE, ref_usd
         )
         state = load_kraken_trade_state()
@@ -79,7 +79,7 @@ class KrakenTelegramService:
         ref_usd, _ = ref_notional_for_range_selection(
             client, kr_pool, symbols_active=SYMBOLS_ACTIVE
         )
-        symbols, _ = select_top_symbols_for_range(
+        symbols, _, _ = select_top_symbols_for_range(
             client, kr_pool, SYMBOLS_ACTIVE, ref_usd
         )
         watch = symbols if symbols else kr_pool[:SYMBOLS_ACTIVE]
@@ -105,7 +105,7 @@ class KrakenTelegramService:
         ref_usd, _ = ref_notional_for_range_selection(
             client, kr_pool, symbols_active=SYMBOLS_ACTIVE
         )
-        symbols, levels = select_top_symbols_for_range(
+        symbols, levels, _ = select_top_symbols_for_range(
             client, kr_pool, SYMBOLS_ACTIVE, ref_usd
         )
         state = load_kraken_trade_state()
