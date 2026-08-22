@@ -21,7 +21,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write
   actions: write # upload-artifact (journals)
 
 jobs:
@@ -29,9 +29,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # Pip-cache: hergebruikt geïnstalleerde packages zolang pyproject.toml niet wijzigt.
-      # Bespaart ~2–3 min per run (ccxt + pandas hoeven niet opnieuw gedownload te worden).
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -39,6 +40,7 @@ jobs:
           cache-dependency-path: pyproject.toml
 
       # Trade-state cache: persisteert notified_trade_ids en entries tussen runs.
+      # Journals blijven ook in data/ (git); cache dekt ephemeral root-bestanden.
       - uses: actions/cache@v4
         with:
           path: |
@@ -47,6 +49,8 @@ jobs:
             kraken_runs.jsonl
             kraken_bot_trades.jsonl
           key: kraken-trade-state-${{ runner.os }}
+          restore-keys: |
+            kraken-trade-state-${{ runner.os }}
 
       - name: Install dependencies
         run: pip install -e .
@@ -69,6 +73,35 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python -m kraken.live_trader
 
+      - name: Export en bewaar trade-log in repo
+        if: always()
+        continue-on-error: true
+        run: |
+          python -m rangebot.live.export_trade_log
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git pull --rebase origin main 2>/dev/null || true
+          git add data/kraken_trades.jsonl data/kraken_trades.csv
+          if git diff --cached --quiet; then
+            echo "Geen nieuwe trades, skip push."
+            exit 0
+          fi
+          git commit -m "chore: trade log $(date -u +%Y-%m-%dT%H:%MZ) [skip ci]"
+
+          for attempt in 1 2 3; do
+            if git push origin HEAD; then
+              echo "Push geslaagd (poging $attempt)."
+              exit 0
+            fi
+            echo "Push poging $attempt mislukt, rebase en opnieuw..."
+            git pull --rebase origin main 2>/dev/null || true
+            sleep $((attempt * 5))
+          done
+          echo "⚠️  Push na 3 pogingen mislukt; data blijft in cache/artifact."
+          exit 1
+
       - name: Upload Kraken journals
         if: always()
         uses: actions/upload-artifact@v4
@@ -78,9 +111,11 @@ jobs:
             kraken_trades.jsonl
             kraken_runs.jsonl
             kraken_bot_trades.jsonl
+            data/kraken_trades.jsonl
+            data/kraken_trades.csv
             .kraken_trade_state.json
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 14
 
       - name: Notify on failure
         if: failure()

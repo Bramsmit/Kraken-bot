@@ -11,11 +11,12 @@ venv/
 .kraken_trade_state.json
 .kraken_bot_control.json
 .kraken_day_state.json
-kraken_trades.jsonl
-kraken_runs.jsonl
-kraken_bot_trades.jsonl
-trades.jsonl
-bitvavo_trades.jsonl
+# Ephemeral werkjournals in de repo-root; data/ is de canonieke versioned log
+/kraken_trades.jsonl
+/kraken_runs.jsonl
+/kraken_bot_trades.jsonl
+/trades.jsonl
+/bitvavo_trades.jsonl
 __pycache__
 *.pyc
 *.egg-info/

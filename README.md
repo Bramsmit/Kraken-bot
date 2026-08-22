@@ -25,6 +25,7 @@ Python spot bot: **daily range** op **Kraken** (USD-paren). Strategielogica in `
 | `kraken/` | Entry + `kraken_runtime` |
 | `bot_live/` | Dunne **`python -m bot_live.*`-entrypoints** + `config`/`telegram`/`journal`-shims (o.a. voor gearchiveerde scripts) |
 | `tests/` | Pytest |
+| `data/` | Persistente trade-log (`kraken_trades.jsonl` / `.csv`) — CI commit na elke run |
 | `scripts/run_bot.py` | Roept `rangebot.main` aan |
 
 ## GitHub Actions & secrets
@@ -62,6 +63,16 @@ pip install -e .    # in gekloonde repo
 
 Zie `.env.example`: `TELEGRAM_*`, optioneel `TELEGRAM_*_KRAKEN` overrides.
 
-## Journal-exports (optioneel)
+## Persistente trade-log
 
-Oude export/`run_compare`-hulpscripts zaten in een verwijderde archiefmap; desnoods terugzetten uit eerdere commits via git.
+Ephemeral root-bestanden (`kraken_bot_trades.jsonl`, `kraken_trades.jsonl`) zijn gitignored
+en worden tussen CI-runs via Actions cache bewaard.
+
+Canonieke log (versioned in git):
+
+```bash
+python -m rangebot.live.export_trade_log
+```
+
+Schrijft **`data/kraken_trades.jsonl`** + **`.csv`**. De uurlijkse workflow merged en pusht
+nieuwe fills automatisch (`chore: trade log … [skip ci]`). Zie [`data/README.md`](data/README.md).
