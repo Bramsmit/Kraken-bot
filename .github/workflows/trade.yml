@@ -69,6 +69,7 @@ jobs:
           KRAKEN_API_KEY: ${{ secrets.KRAKEN_API_KEY }}
           KRAKEN_API_SECRET: ${{ secrets.KRAKEN_API_SECRET }}
           KRAKEN_DRY_RUN: ${{ vars.KRAKEN_DRY_RUN }}
+          KRAKEN_POST_ONLY: ${{ vars.KRAKEN_POST_ONLY || 'true' }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python -m kraken.live_trader

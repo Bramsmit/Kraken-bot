@@ -214,6 +214,15 @@ def check_and_notify_kraken_fills(
             fee_usd = trade_fee_usd_from_ccxt(tr, symbol=sym, price=price)
             if fee_usd is not None:
                 cum_fees += fee_usd
+            notional = qty * price
+            if fee_usd is not None and notional > 0:
+                fee_rate = fee_usd / notional
+                if fee_rate > 0.0035:
+                    log.warning(
+                        "Taker-verdacht fee rate %.4f on %s",
+                        fee_rate,
+                        sym,
+                    )
 
             buy_fee_this: float | None = None
 
