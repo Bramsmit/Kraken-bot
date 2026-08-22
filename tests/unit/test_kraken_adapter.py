@@ -89,7 +89,7 @@ def test_next_kraken_nonce_is_monotonic(tmp_path, monkeypatch: pytest.MonkeyPatc
     n1 = next_kraken_nonce()
     n2 = next_kraken_nonce()
     assert n2 > n1
-    assert n1 == 1_700_000_000_000
+    assert n1 == 1_700_000_000_000_000
 
 
 def test_bump_kraken_nonce_after_invalid(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -104,7 +104,7 @@ def test_bump_kraken_nonce_after_invalid(tmp_path, monkeypatch: pytest.MonkeyPat
         lambda: 1_700_000_000.0,
     )
     bump_kraken_nonce_after_invalid()
-    assert int(nonce_file.read_text()) >= 1_700_000_005_000
+    assert int(nonce_file.read_text()) >= 1_700_000_005_000_000
 
 
 def test_retry_ccxt_recovers_from_invalid_nonce(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:

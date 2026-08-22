@@ -6,7 +6,7 @@
 
 ## Commits
 
-- `<hash>` — `chore: log symbol selection scores and reject reasons`
+- `6ccbaba57a4915959c854512a3a4b6ffcda1c983` — `chore: log symbol selection scores and reject reasons`
 
 ## Tests run
 

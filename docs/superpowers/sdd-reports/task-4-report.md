@@ -6,7 +6,7 @@
 
 ## Commits
 
-- `4958467b82d6419bf540fefa32479f985d2311d7` — `fix: use measured Kraken maker fees in spread gate`
+- `606080342f998dcffefc6b2403e836760c9a851f` — `fix: use measured Kraken maker fees in spread gate`
 
 ## Tests run
 

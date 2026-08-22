@@ -6,7 +6,7 @@
 
 ## Commits
 
-- `4957b238a98086f75bf2242c6a63077cbd53f38c` — `feat: optional per-symbol notional cap for Kraken buys`
+- `39ae0a1661b5d2057a123d9aa37e2b6da413b885` — `feat: optional per-symbol notional cap for Kraken buys`
 
 ## Tests run
 
