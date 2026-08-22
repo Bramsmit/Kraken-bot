@@ -38,6 +38,16 @@ def levels_score_from_daily_rows(
     return buy_level, sell_level, score
 
 
+def levels_for_exit_only(
+    rows: list[dict[str, float]],
+) -> tuple[float, float] | None:
+    """Bereken buy/sell levels zonder spread-gate (alleen voor orphan exit)."""
+    t = levels_score_from_daily_rows(rows, min_spread_frac=0.0)
+    if t is None:
+        return None
+    return t[0], t[1]
+
+
 def levels_passing_spread(
     rows: list[dict[str, float]],
     min_spread_frac: float,

@@ -25,7 +25,7 @@ from rangebot.config.settings import (
     SYMBOLS_ACTIVE,
     required_min_spread_fraction_crypto_usd,
 )
-from rangebot.data.market_data import get_mid_price
+from rangebot.data.market_data import fetch_symbol_rows_for_pool, get_mid_price
 from rangebot.execution.order_manager import (
     cancel_order_safe,
     order_age_hours,
@@ -59,7 +59,9 @@ from rangebot.run_audit import KRAKEN_RUNS_JSONL, log_run_audit
 from rangebot.strategy.signals import (
     dry_run_from_env,
     select_top_symbols_for_range,
+    symbols_with_balance,
 )
+from rangebot.strategy.range_strategy import levels_for_exit_only
 from rangebot.telegram.bot import send_telegram
 from rangebot.telegram.config import apply_kraken_telegram_env_overrides
 from rangebot.telegram.control_state import is_trading_paused
@@ -147,6 +149,9 @@ def run_once() -> dict:
         )
         return {}
 
+    held = symbols_with_balance(client, kr_pool)
+    managed = list(dict.fromkeys(symbols + [s for s in held if s not in symbols]))
+
     portfolio_usd_pre = estimate_portfolio_usd(client, kr_pool)
     new_trades, entries_after_fills = check_and_notify_kraken_fills(
         client,
@@ -155,12 +160,12 @@ def run_once() -> dict:
     )
 
     mid_prices: dict[str, float] = {}
-    for s in symbols:
+    for s in managed:
         mp = get_mid_price(client, s)
         if mp:
             mid_prices[s] = mp
 
-    positions = get_positions_map(client, symbols, entries_after_fills)
+    positions = get_positions_map(client, managed, entries_after_fills)
     portfolio_equity = estimate_portfolio_usd(client, kr_pool)
     free_usd = get_buying_power_usd(client)
     capital_per = capital_per_active_symbol_usd(
@@ -172,6 +177,11 @@ def run_once() -> dict:
     stats = {"placed": 0, "updated": 0, "unchanged": 0, "skipped": 0}
 
     log.info("[Kraken] Geselecteerd: %s", ", ".join(symbols))
+    if len(managed) > len(symbols):
+        log.info(
+            "Managed (+ orphan exits): %s",
+            ", ".join(managed),
+        )
     log.info(
         "Spread-drempel: ref-notional $%.2f → min. spread %.2f%%",
         ref_usd,
@@ -189,10 +199,24 @@ def run_once() -> dict:
     log.info("Positions (free qty): %s", positions)
     log.info("")
 
-    for symbol in symbols:
+    for symbol in managed:
         if symbol not in levels:
-            continue
-        buy_level, sell_level = levels[symbol]
+            if symbol in held:
+                rows_map = fetch_symbol_rows_for_pool(client, [symbol])
+                rows = rows_map.get(symbol)
+                exit_lv = levels_for_exit_only(rows) if rows else None
+                if exit_lv:
+                    buy_level, sell_level = exit_lv
+                    log.info(
+                        "  %s: orphan exit mode (buiten spread-filter)",
+                        symbol,
+                    )
+                else:
+                    continue
+            else:
+                continue
+        else:
+            buy_level, sell_level = levels[symbol]
         pos_qty, avg_entry = positions.get(symbol, (0.0, 0.0))
         open_orders = fetch_open_orders(client, symbol)
 
@@ -415,7 +439,7 @@ def run_once() -> dict:
                 except Exception as e:
                     log.warning("  %s: sell fout: %s", symbol, e)
                     send_telegram(f"❌ [Kraken] {symbol}: sell-fout: {e}")
-        else:
+        elif symbol in symbols and symbol in levels:
             if capital_per < MIN_CAPITAL_PER_ASSET_USD:
                 log.info(
                     "  %s: Te weinig kapitaal ($%.2f), skip",
