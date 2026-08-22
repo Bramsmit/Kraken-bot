@@ -42,7 +42,10 @@ from rangebot.execution.position_manager import (
     capital_per_active_symbol_usd,
     ref_notional_for_range_selection,
 )
-from rangebot.execution.risk_manager import stop_price_below_entry
+from rangebot.execution.risk_manager import (
+    minimum_profitable_sell_price,
+    stop_price_below_entry,
+)
 from rangebot.exchange.kraken import (
     check_and_notify_kraken_fills,
     fetch_open_orders,
@@ -228,7 +231,19 @@ def run_once() -> dict:
             )
             entry = avg_entry if avg_entry > 0 else buy_level
             stop_price = stop_price_below_entry(entry)
-            limit_sell = sell_level
+            fee_floor = minimum_profitable_sell_price(
+                entry,
+                maker_round_trip_pct=RANGE_CRYPTO_ESTIMATED_MAKER_ROUND_TRIP_PCT,
+            )
+            limit_sell = max(sell_level, fee_floor)
+            if limit_sell > sell_level:
+                log.info(
+                    "  %s: sell-floor $%.4f (entry $%.4f), range-level $%.4f → floor actief",
+                    symbol,
+                    limit_sell,
+                    entry,
+                    sell_level,
+                )
             needs_new_sell = True
 
             if existing_sell:
@@ -285,6 +300,17 @@ def run_once() -> dict:
                     except Exception as e:
                         log.warning("  %s: cancel sell: %s", symbol, e)
                         needs_new_sell = False
+                elif (
+                    old_sell_price >= fee_floor
+                    and sell_level < fee_floor
+                ):
+                    log.info(
+                        "  %s: Sell ongewijzigd @ $%.4f (floor beschermt tegen verlaging)",
+                        symbol,
+                        old_sell_price,
+                    )
+                    stats["unchanged"] += 1
+                    needs_new_sell = False
                 elif price_diff > ORDER_UPDATE_THRESHOLD:
                     try:
                         cancel_order_safe(
