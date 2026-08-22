@@ -11,6 +11,7 @@ from pathlib import Path
 
 from rangebot.config.settings import (
     KRAKEN_MAX_DEPLOYED_PCT,
+    KRAKEN_MAX_POSITION_VALUE_USD,
     KRAKEN_USE_FIXED_FEE_IN_SPREAD_GATE,
     MAIN_RUN_MAX_RETRIES,
     MAIN_RUN_RETRY_WAIT_BASE_SEC,
@@ -543,14 +544,31 @@ def run_once() -> dict:
                 if needs_new_order:
                     if existing_buy and ORDER_REPLACE_DELAY_SEC > 0:
                         time.sleep(ORDER_REPLACE_DELAY_SEC)
+                    mid = mid_prices.get(symbol) or buy_level
+                    current_notional = pos_qty * mid
+                    cap = KRAKEN_MAX_POSITION_VALUE_USD
+                    if cap and current_notional >= cap:
+                        log.info(
+                            "  %s: positie-cap ($%.2f >= $%.2f), geen buy",
+                            symbol,
+                            current_notional,
+                            cap,
+                        )
+                        stats["skipped"] += 1
+                        continue
+                    capital_for_order = (
+                        min(capital_per, (cap - current_notional))
+                        if cap
+                        else capital_per
+                    )
                     spread_frac = (
                         (sell_level - buy_level) / buy_level
                         if buy_level > 0
                         else 0
                     )
-                    gross_usd_est = capital_per * spread_frac
+                    gross_usd_est = capital_for_order * spread_frac
                     fee_usd_est = (
-                        capital_per
+                        capital_for_order
                         * RANGE_CRYPTO_ESTIMATED_MAKER_ROUND_TRIP_PCT
                     )
                     if KRAKEN_USE_FIXED_FEE_IN_SPREAD_GATE:
@@ -588,7 +606,7 @@ def run_once() -> dict:
                             safe_px,
                         )
                     limit_px = safe_px
-                    qty = capital_per / limit_px
+                    qty = capital_for_order / limit_px
                     try:
                         submit_limit_buy(
                             client,
@@ -600,7 +618,7 @@ def run_once() -> dict:
                             "  %s: Limit buy @ $%.6f notioneel $%.0f",
                             symbol,
                             limit_px,
-                            capital_per,
+                            capital_for_order,
                         )
                         if not existing_buy:
                             send_telegram(

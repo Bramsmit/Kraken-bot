@@ -73,6 +73,7 @@ RANGE_CRYPTO_ESTIMATED_MAKER_ROUND_TRIP_PCT = KRAKEN_MAKER_FEE_RATE * 2
 # kort genoeg om bij state-verlies slechts 1 run aan fills opnieuw te melden.
 FILLED_ORDERS_LOOKBACK_HOURS = 4
 
+# Per-symbol max position notional (USD). Default unset = no cap.
 _km_pos = _os_kraken_adapter.environ.get(
     "KRAKEN_MAX_POSITION_VALUE_USD", ""
 ).strip()
