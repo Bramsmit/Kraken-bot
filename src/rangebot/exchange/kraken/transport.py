@@ -5,13 +5,63 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import TypeVar
 
 import ccxt
 
+from rangebot.utils.paths import repository_root
+
 log = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+_KRAKEN_NONCE_FILE = ".kraken_api_nonce"
+
+
+def _kraken_nonce_path() -> Path:
+    return repository_root() / _KRAKEN_NONCE_FILE
+
+
+def _read_stored_kraken_nonce() -> int:
+    path = _kraken_nonce_path()
+    if not path.exists():
+        return 0
+    try:
+        return int(path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return 0
+
+
+def _write_stored_kraken_nonce(value: int) -> None:
+    path = _kraken_nonce_path()
+    path.write_text(str(value), encoding="utf-8")
+
+
+def next_kraken_nonce() -> int:
+    """
+    Monotonic Kraken API nonce (milliseconds), persisted across runs.
+
+    Kraken rejects duplicate or decreasing nonces. Sharing one API key across
+    CI, local runs, and MCP requires a file-backed counter that always moves
+    forward.
+    """
+    now_ms = int(time.time() * 1000)
+    last = _read_stored_kraken_nonce()
+    n = max(last + 1, now_ms)
+    _write_stored_kraken_nonce(n)
+    return n
+
+
+def bump_kraken_nonce_after_invalid(*, ahead_ms: int = 5_000) -> None:
+    """Jump nonce forward after EAPI:Invalid nonce (other client used the key)."""
+    now_ms = int(time.time() * 1000)
+    last = _read_stored_kraken_nonce()
+    _write_stored_kraken_nonce(max(last + 10_000, now_ms + ahead_ms))
+    log.warning(
+        "Kraken nonce bumped naar %d na InvalidNonce",
+        _read_stored_kraken_nonce(),
+    )
 
 
 def load_kraken_credentials_from_env() -> tuple[str, str]:
@@ -42,6 +92,7 @@ def build_ccxt_kraken() -> ccxt.kraken:
             "apiKey": api_key,
             "secret": secret,
             "enableRateLimit": True,
+            "nonce": next_kraken_nonce,
         }
     )
     ex.load_markets()
@@ -53,6 +104,7 @@ _RETRIABLE = (
     ccxt.RequestTimeout,
     ccxt.ExchangeNotAvailable,
     ccxt.DDoSProtection,
+    ccxt.InvalidNonce,
 )
 
 
@@ -64,6 +116,8 @@ def retry_ccxt(description: str, fn: Callable[[], T], *, max_attempts: int = 4) 
             return fn()
         except _RETRIABLE as e:
             last_exc = e
+            if isinstance(e, ccxt.InvalidNonce):
+                bump_kraken_nonce_after_invalid()
             wait = min(8.0, 1.0 * (2**attempt))
             log.warning(
                 "%s (poging %d/%d): %s — %s",

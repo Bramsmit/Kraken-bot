@@ -12,7 +12,11 @@ from rangebot.exchange.kraken.client import KrakenExchangeClient, create_kraken_
 from rangebot.exchange.kraken.common import post_only_from_env
 from rangebot.exchange.kraken.state_and_fills import _stable_trade_id
 from rangebot.exchange.kraken.validation import kraken_limit_minimums
-from rangebot.exchange.kraken.transport import retry_ccxt
+from rangebot.exchange.kraken.transport import (
+    bump_kraken_nonce_after_invalid,
+    next_kraken_nonce,
+    retry_ccxt,
+)
 from rangebot.exchange.kraken.validation import (
     OrderValidationError,
     validate_limit_order_placement,
@@ -65,6 +69,56 @@ def test_retry_ccxt_succeeds_after_transient_failure(mock_ccxt: MagicMock) -> No
         calls["n"] += 1
         if calls["n"] < 2:
             raise ccxt.NetworkError("temporary")
+        return "ok"
+
+    with patch("rangebot.exchange.kraken.transport.time.sleep"):
+        assert retry_ccxt("test", flaky, max_attempts=4) == "ok"
+    assert calls["n"] == 2
+
+
+def test_next_kraken_nonce_is_monotonic(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    nonce_file = tmp_path / ".kraken_api_nonce"
+    monkeypatch.setattr(
+        "rangebot.exchange.kraken.transport._kraken_nonce_path",
+        lambda: nonce_file,
+    )
+    monkeypatch.setattr(
+        "rangebot.exchange.kraken.transport.time.time",
+        lambda: 1_700_000_000.0,
+    )
+    n1 = next_kraken_nonce()
+    n2 = next_kraken_nonce()
+    assert n2 > n1
+    assert n1 == 1_700_000_000_000
+
+
+def test_bump_kraken_nonce_after_invalid(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    nonce_file = tmp_path / ".kraken_api_nonce"
+    nonce_file.write_text("1000", encoding="utf-8")
+    monkeypatch.setattr(
+        "rangebot.exchange.kraken.transport._kraken_nonce_path",
+        lambda: nonce_file,
+    )
+    monkeypatch.setattr(
+        "rangebot.exchange.kraken.transport.time.time",
+        lambda: 1_700_000_000.0,
+    )
+    bump_kraken_nonce_after_invalid()
+    assert int(nonce_file.read_text()) >= 1_700_000_005_000
+
+
+def test_retry_ccxt_recovers_from_invalid_nonce(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    nonce_file = tmp_path / ".kraken_api_nonce"
+    monkeypatch.setattr(
+        "rangebot.exchange.kraken.transport._kraken_nonce_path",
+        lambda: nonce_file,
+    )
+    calls = {"n": 0}
+
+    def flaky() -> str:
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise ccxt.InvalidNonce('kraken {"error":["EAPI:Invalid nonce"]}')
         return "ok"
 
     with patch("rangebot.exchange.kraken.transport.time.sleep"):

@@ -45,6 +45,7 @@ jobs:
         with:
           path: |
             .kraken_trade_state.json
+            .kraken_api_nonce
             kraken_trades.jsonl
             kraken_runs.jsonl
             kraken_bot_trades.jsonl
