@@ -225,6 +225,9 @@ class KrakenExchangeClient(ExchangeClient):
 
     def cancel_order(self, order_id: str, symbol: str) -> None:
         sym = norm_symbol(symbol)
+        if self._dry_run:
+            log.info("DRY_RUN zou nu CANCEL %s sturen: order %s", sym, order_id)
+            return
         self._orders.cancel_order(order_id, sym)
 
     def get_open_orders(self, symbol: str) -> list[dict[str, Any]]:

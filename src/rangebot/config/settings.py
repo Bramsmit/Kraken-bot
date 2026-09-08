@@ -92,6 +92,13 @@ KRAKEN_MAX_DEPLOYED_PCT = float(
     _os_kraken_adapter.environ.get("KRAKEN_MAX_DEPLOYED_PCT", "0.45")
 )
 
+# Ligt het buy-level verder dan dit onder de markt, dan is de range omhoog
+# gebroken: zo'n limietorder vult praktisch nooit, maar reserveert wel cash en
+# een koopslot. Het slot gaat dan naar een symbool dat nog in zijn range zit.
+KRAKEN_MAX_BUY_DISTANCE_PCT = float(
+    _os_kraken_adapter.environ.get("KRAKEN_MAX_BUY_DISTANCE_PCT", "0.10")
+)
+
 
 def kraken_dry_run_from_env() -> bool:
     """Default True (safe): set ``KRAKEN_DRY_RUN=false`` for live orders."""

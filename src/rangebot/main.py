@@ -10,6 +10,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from rangebot.config.settings import (
+    KRAKEN_MAX_BUY_DISTANCE_PCT,
     KRAKEN_MAX_DEPLOYED_PCT,
     KRAKEN_MAX_POSITION_VALUE_USD,
     KRAKEN_USE_FIXED_FEE_IN_SPREAD_GATE,
@@ -65,7 +66,16 @@ from rangebot.strategy.signals import (
     select_top_symbols_for_range,
     symbols_with_balance,
 )
-from rangebot.strategy.range_strategy import levels_for_exit_only
+from rangebot.strategy.range_strategy import (
+    BUY_ORDER_ABANDON,
+    BUY_ORDER_REPLACE_AGED,
+    BUY_ORDER_REPLACE_STALE_PRICE,
+    BUY_ORDER_UPDATE_LEVEL,
+    buy_level_distance_frac,
+    decide_buy_order_action,
+    is_buy_level_reachable,
+    levels_for_exit_only,
+)
 from rangebot.telegram.bot import send_telegram
 from rangebot.telegram.config import apply_kraken_telegram_env_overrides
 from rangebot.telegram.control_state import is_trading_paused
@@ -169,10 +179,24 @@ def run_once() -> dict:
         client, kr_pool, symbols_active=SYMBOLS_ACTIVE
     )
 
-    symbols, levels, levels_scored = select_top_symbols_for_range(
+    symbols, levels, levels_scored, pool_prices = select_top_symbols_for_range(
         client, kr_pool, SYMBOLS_ACTIVE, ref_usd
     )
     selection_debug = _log_and_build_selection_debug(kr_pool, levels_scored, symbols)
+    out_of_range = [
+        sym
+        for sym, (buy, _sell, _score) in levels_scored.items()
+        if sym not in symbols
+        and not is_buy_level_reachable(
+            pool_prices.get(sym), buy, KRAKEN_MAX_BUY_DISTANCE_PCT
+        )
+    ]
+    if out_of_range:
+        log.info(
+            "Buiten bereik (>%.0f%% boven buy-level, geen slot): %s",
+            KRAKEN_MAX_BUY_DISTANCE_PCT * 100,
+            ", ".join(out_of_range),
+        )
     if not symbols:
         log.warning("Geen symbolen geselecteerd")
         send_telegram("⚠️ Kraken: geen symbolen geselecteerd uit pool")
@@ -223,6 +247,7 @@ def run_once() -> dict:
     capital_per = min(capital_per, deploy_room / max(1, buy_slots))
 
     stats = {"placed": 0, "updated": 0, "unchanged": 0, "skipped": 0}
+    buy_levels_out_of_range = 0
 
     log.info("[Kraken] Geselecteerd: %s", ", ".join(symbols))
     if len(managed) > len(symbols):
@@ -490,6 +515,50 @@ def run_once() -> dict:
                     log.warning("  %s: sell fout: %s", symbol, e)
                     send_telegram(f"❌ [Kraken] {symbol}: sell-fout: {e}")
         elif symbol in symbols and symbol in levels:
+            current_price = mid_prices.get(symbol)
+            existing_buy = next(
+                (
+                    o
+                    for o in open_orders
+                    if o.get("side") == "buy"
+                ),
+                None,
+            )
+            old_price = float(existing_buy.get("price") or 0) if existing_buy else None
+            age_hours = order_age_hours(existing_buy) if existing_buy else 0.0
+            action = decide_buy_order_action(
+                buy_level=buy_level,
+                current_price=current_price,
+                existing_order_price=old_price,
+                order_age_hours=age_hours,
+                max_buy_distance_frac=KRAKEN_MAX_BUY_DISTANCE_PCT,
+            )
+
+            if action == BUY_ORDER_ABANDON:
+                # Vóór de kapitaalcheck: juist bij weinig cash moet de dode
+                # order weg, want die houdt het geld en het koopslot vast.
+                distance = buy_level_distance_frac(current_price, buy_level) or 0.0
+                cancelled = False
+                if existing_buy:
+                    try:
+                        cancel_order_safe(client, str(existing_buy["id"]), symbol)
+                        cancelled = True
+                    except Exception as e:
+                        log.warning("  %s: cancel buy: %s", symbol, e)
+                log.info(
+                    "  %s: Buy overgeslagen: prijs $%.4f staat %.1f%% boven "
+                    "buy-level $%.4f (max %.0f%%)%s",
+                    symbol,
+                    float(current_price or 0.0),
+                    distance * 100,
+                    buy_level,
+                    KRAKEN_MAX_BUY_DISTANCE_PCT * 100,
+                    "; order geannuleerd, kapitaal vrij" if cancelled else "",
+                )
+                buy_levels_out_of_range += 1
+                stats["skipped"] += 1
+                continue
+
             if capital_per < MIN_CAPITAL_PER_ASSET_USD:
                 log.info(
                     "  %s: Te weinig kapitaal ($%.2f), skip",
@@ -501,32 +570,10 @@ def run_once() -> dict:
                 log.info("  %s: Prijs te laag voor limiet", symbol)
                 stats["skipped"] += 1
             else:
-                existing_buy = next(
-                    (
-                        o
-                        for o in open_orders
-                        if o.get("side") == "buy"
-                    ),
-                    None,
-                )
                 needs_new_order = True
 
                 if existing_buy:
-                    old_price = float(existing_buy.get("price") or 0)
-                    age_hours = order_age_hours(existing_buy)
-                    price_diff = (
-                        abs(old_price - buy_level) / old_price
-                        if old_price
-                        else 1.0
-                    )
-                    current_price = mid_prices.get(symbol)
-
-                    if (
-                        current_price
-                        and old_price
-                        and current_price
-                        > old_price * (1 + ORDER_STALE_PRICE_THRESHOLD)
-                    ):
+                    if action == BUY_ORDER_REPLACE_STALE_PRICE:
                         try:
                             cancel_order_safe(
                                 client, str(existing_buy["id"]), symbol
@@ -541,7 +588,7 @@ def run_once() -> dict:
                                 "  %s: cancel buy: %s", symbol, e
                             )
                             needs_new_order = False
-                    elif age_hours >= ORDER_MAX_AGE_HOURS:
+                    elif action == BUY_ORDER_REPLACE_AGED:
                         try:
                             cancel_order_safe(
                                 client, str(existing_buy["id"]), symbol
@@ -556,7 +603,7 @@ def run_once() -> dict:
                                 "  %s: cancel buy: %s", symbol, e
                             )
                             needs_new_order = False
-                    elif price_diff > ORDER_UPDATE_THRESHOLD:
+                    elif action == BUY_ORDER_UPDATE_LEVEL:
                         try:
                             cancel_order_safe(
                                 client, str(existing_buy["id"]), symbol
@@ -724,6 +771,9 @@ def run_once() -> dict:
             else 0,
             "symbols_selected": list(symbols),
             "symbols_held": sorted(held),
+            "buy_levels_out_of_range": buy_levels_out_of_range,
+            "max_buy_distance_pct": KRAKEN_MAX_BUY_DISTANCE_PCT,
+            "pool_out_of_range": out_of_range,
             "selection_debug": selection_debug,
             "summary_text": summary,
             "kraken_pool": [norm_symbol(x) for x in kr_pool],

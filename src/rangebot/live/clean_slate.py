@@ -56,7 +56,8 @@ def cancel_all_pool_orders(client) -> int:
 def main() -> None:
     _load_dotenv_if_present()
     try:
-        client = create_kraken_client()
+        # Annuleren is het doel van deze tool, dus niet afhankelijk van DRY_RUN.
+        client = create_kraken_client(dry_run=False)
     except ValueError as e:
         print(f"❌ {e}")
         return

@@ -186,6 +186,19 @@ def test_place_order_dry_run_no_ccxt_create_limit(mock_ccxt: MagicMock) -> None:
     mock_ccxt.create_limit_sell_order.assert_not_called()
 
 
+def test_cancel_order_dry_run_does_not_touch_exchange(mock_ccxt: MagicMock) -> None:
+    """Een dry-run mag geen live orders opruimen; alleen plaatsen was afgeschermd."""
+    client = KrakenExchangeClient(mock_ccxt, dry_run=True)
+    client.cancel_order("OID-1", "ETH/USD")
+    mock_ccxt.cancel_order.assert_not_called()
+
+
+def test_cancel_order_live_calls_exchange(mock_ccxt: MagicMock) -> None:
+    client = KrakenExchangeClient(mock_ccxt, dry_run=False)
+    client.cancel_order("OID-1", "ETH/USD")
+    mock_ccxt.cancel_order.assert_called_once_with("OID-1", "ETH/USD")
+
+
 def test_place_order_live_calls_create_limit_buy(mock_ccxt: MagicMock) -> None:
     client = KrakenExchangeClient(mock_ccxt, dry_run=False)
     mock_ccxt.create_limit_buy_order.return_value = {"id": "x"}
