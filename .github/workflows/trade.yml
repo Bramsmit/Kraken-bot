@@ -40,7 +40,8 @@ jobs:
           cache-dependency-path: pyproject.toml
 
       # Trade-state cache: persisteert notified_trade_ids en entries tussen runs.
-      # Journals blijven ook in data/ (git); cache dekt ephemeral root-bestanden.
+      # Unieke primary key: actions/cache@v4 slaat niet op bij hit op dezelfde key.
+      # restore-keys: nieuwste unieke cache, daarna de oude vaste OS-key (migratie).
       - uses: actions/cache@v4
         with:
           path: |
@@ -49,8 +50,9 @@ jobs:
             kraken_trades.jsonl
             kraken_runs.jsonl
             kraken_bot_trades.jsonl
-          key: kraken-trade-state-${{ runner.os }}
+          key: kraken-trade-state-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
+            kraken-trade-state-${{ runner.os }}-
             kraken-trade-state-${{ runner.os }}
 
       - name: Install dependencies
