@@ -88,8 +88,10 @@ KRAKEN_MIN_POSITION_NOTIONAL_USD = (
     RANGE_CRYPTO_ROUND_TRIP_FIXED_USD / MIN_SPREAD_PCT
 )  # $25 bij defaults
 
+# Maximaal deel van de portefeuille in posities. 0.45 liet op ~$350 equity
+# met één CRV-positie (~40%) te weinig ruimte over voor een $10-minimum buy.
 KRAKEN_MAX_DEPLOYED_PCT = float(
-    _os_kraken_adapter.environ.get("KRAKEN_MAX_DEPLOYED_PCT", "0.45")
+    _os_kraken_adapter.environ.get("KRAKEN_MAX_DEPLOYED_PCT", "0.60")
 )
 
 # Ligt het buy-level verder dan dit onder de markt, dan is de range omhoog
