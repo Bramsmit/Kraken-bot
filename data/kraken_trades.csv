@@ -89,3 +89,4 @@ timestamp,trade_id,symbol,side,qty,price,fee_usd,notional_usd,entry_price,profit
 2026-09-04T19:24:11.058000+00:00,T7JAEE-LKFVA-YUJRHT,DOT/USD,sell,6.03e-06,0.8773,,5.29e-06,,,412.05,kraken_bot_trades.jsonl
 2026-09-05T18:17:07.177000+00:00,TLCHLZ-VMNF4-ROXYSX,CRV/USD,sell,142.6365,0.36978,0.15823,52.74412497,,,408.97,kraken_bot_trades.jsonl
 2026-09-05T18:17:08.584000+00:00,TF7LVE-VUFFO-55ZOIN,CRV/USD,sell,4.298e-05,0.36978,,1.589e-05,,,408.97,kraken_bot_trades.jsonl
+2026-09-08T02:54:03.529000+00:00,TJTGPR-LASMO-OA44UD,CRV/USD,buy,143.4822339,0.36395,0.15666,52.22035903,,,361.15,kraken_bot_trades.jsonl
