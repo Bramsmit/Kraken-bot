@@ -9,7 +9,11 @@ from rangebot.config.settings import (
 )
 from rangebot.data.market_data import fetch_symbol_rows_for_pool
 from rangebot.exchange.base import ExchangeClient
-from rangebot.execution.position_manager import get_qty_for_symbol, is_tradable_position
+from rangebot.execution.position_manager import (
+    get_qty_for_symbol,
+    held_qty,
+    is_tradable_position,
+)
 from rangebot.strategy.range_strategy import (
     build_levels_scored_from_symbol_rows,
     levels_passing_spread,
@@ -43,7 +47,8 @@ def symbols_with_balance(
     """Symbols in pool with tradable notional (above dust fee floor)."""
     out: set[str] = set()
     for sym in pool:
-        qf, _ = get_qty_for_symbol(client, sym)
+        qf, qt = get_qty_for_symbol(client, sym)
+        qty = held_qty(qf, qt)
         if prices is None:
             try:
                 ref_px = client.get_latest_price(sym)
@@ -51,7 +56,7 @@ def symbols_with_balance(
                 continue
         else:
             ref_px = prices.get(sym)
-        if ref_px and is_tradable_position(qf, float(ref_px)):
+        if ref_px and is_tradable_position(qty, float(ref_px)):
             out.add(sym)
     return out
 

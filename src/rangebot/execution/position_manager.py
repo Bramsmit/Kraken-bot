@@ -19,10 +19,17 @@ log = logging.getLogger(__name__)
 
 
 def is_tradable_position(qty: float, ref_price: float) -> bool:
-    """True when free qty is above dust and notional meets the fee floor."""
+    """True when held qty is above dust and notional meets the fee floor."""
     if qty <= 0 or Decimal(str(qty)) < MIN_SELLABLE_CRYPTO_QTY:
         return False
     return qty * float(ref_price or 0) >= KRAKEN_MIN_POSITION_NOTIONAL_USD
+
+
+def held_qty(free: float, total: float) -> float:
+    """Qty we still own, including coins locked in open sell orders."""
+    tot = float(total or 0)
+    fr = float(free or 0)
+    return tot if tot > 0 else fr
 
 
 def _balance_entry(balance: dict[str, Any], code: str) -> tuple[float, float]:
@@ -47,20 +54,21 @@ def estimate_portfolio_usd(
     client: ExchangeClient,
     reference_symbols: list[str],
 ) -> float:
-    """Rough USD: free USD + sum free base * last for watchlist symbols."""
+    """USD equity: total cash + marked-to-market held coins (incl. locked)."""
     bal = client.get_balances()
-    usd_free, _ = _balance_entry(bal, "USD")
-    if usd_free <= 0:
-        usd_free, _ = _balance_entry(bal, "ZUSD")
-    total = usd_free
+    usd_free, usd_total = _balance_entry(bal, "USD")
+    if held_qty(usd_free, usd_total) <= 0:
+        usd_free, usd_total = _balance_entry(bal, "ZUSD")
+    total = held_qty(usd_free, usd_total)
     for sym in reference_symbols:
         base = sym.split("/")[0]
-        qf, _ = _balance_entry(bal, base)
-        if qf and qf > 0:
+        qf, qt = _balance_entry(bal, base)
+        qty = held_qty(qf, qt)
+        if qty > 0:
             try:
                 last = client.get_latest_price(sym)
                 if last:
-                    total += float(qf) * float(last)
+                    total += qty * float(last)
             except Exception as e:  # noqa: BLE001
                 log.warning("price %s: %s", sym, e)
     return total
@@ -118,13 +126,13 @@ def get_positions_map(
     symbols: list[str],
     entries_state: dict[str, Any],
 ) -> dict[str, tuple[float, float]]:
-    """Per symbol: (free qty, avg entry from state)."""
+    """Per symbol: (held qty incl. locked, avg entry from state)."""
     out: dict[str, tuple[float, float]] = {}
     for sym in symbols:
-        free_q, _tot = get_qty_for_symbol(client, sym)
+        free_q, tot_q = get_qty_for_symbol(client, sym)
         ent = entries_state.get(sym) or {}
         ep = float(ent.get("entry") or 0)
-        out[sym] = (free_q, ep)
+        out[sym] = (held_qty(free_q, tot_q), ep)
     return out
 
 
@@ -134,19 +142,25 @@ def persist_entries_from_balances(
     entries_memory: dict[str, Any],
     mid_prices: dict[str, float],
 ) -> dict[str, Any]:
-    """Entries dict: qty from balance, entry from memory or mid price."""
+    """
+    Persist held qty + known entry. Never invent an entry from the mid price:
+    that made the sell-floor compare against today's print instead of cost.
+    """
     out: dict[str, Any] = {}
     for sym in symbols:
-        free_q, _ = get_qty_for_symbol(client, sym)
-        if free_q <= 0:
+        free_q, tot_q = get_qty_for_symbol(client, sym)
+        qty = held_qty(free_q, tot_q)
+        if qty <= 0:
             continue
         ref_px = float(mid_prices.get(sym) or 0)
-        if not is_tradable_position(free_q, ref_px):
+        if not is_tradable_position(qty, ref_px):
             continue
-        mem = entries_memory.get(sym)
-        if mem and float(mem.get("entry") or 0) > 0:
-            out[sym] = {"qty": float(free_q), "entry": float(mem["entry"])}
-        else:
-            px = float(mid_prices.get(sym) or 0)
-            out[sym] = {"qty": float(free_q), "entry": px}
+        mem = entries_memory.get(sym) or {}
+        entry = float(mem.get("entry") or 0)
+        if entry <= 0:
+            continue
+        rec: dict[str, Any] = {"qty": float(qty), "entry": entry}
+        if mem.get("buy_fee_usd") is not None:
+            rec["buy_fee_usd"] = mem["buy_fee_usd"]
+        out[sym] = rec
     return out

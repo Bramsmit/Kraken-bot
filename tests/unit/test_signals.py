@@ -29,6 +29,14 @@ def test_symbols_with_balance_includes_only_above_dust() -> None:
     assert signals.symbols_with_balance(client, pool) == {"ETH/USD"}
 
 
+def test_symbols_with_balance_counts_locked_position() -> None:
+    """Een sell-order zet free=0; de positie moet het slot blijven houden."""
+    client = MagicMock(spec=ExchangeClient)
+    client.get_open_positions.return_value = {"AAVE/USD": (0.0, 0.3444)}
+    client.get_latest_price.return_value = 126.3
+    assert signals.symbols_with_balance(client, ["AAVE/USD"]) == {"AAVE/USD"}
+
+
 def test_symbols_with_balance_skips_symbol_when_price_unavailable() -> None:
     client = MagicMock(spec=ExchangeClient)
     client.get_open_positions.return_value = {"ETH/USD": (1.0, 30.0)}

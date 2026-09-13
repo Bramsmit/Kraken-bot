@@ -22,3 +22,5 @@ def test_trade_workflow_cache_saves_after_hit() -> None:
     assert "kraken-trade-state-${{ runner.os }}-" in yml
     # Exacte OS-key als restore-prefix is de bug: dan wordt de cache nooit herschreven.
     assert "key: kraken-trade-state-${{ runner.os }}\n" not in yml
+    # Tweede restore-key zonder streepje pakt de bevroren Aug-22 cache.
+    assert "kraken-trade-state-${{ runner.os }}\n" not in yml.split("restore-keys:")[-1]

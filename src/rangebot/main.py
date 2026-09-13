@@ -235,7 +235,11 @@ def run_once() -> dict:
         for sym in symbols
         if not is_tradable_position(*positions.get(sym, (0.0, 0.0)))
     )
-    deployed = max(0.0, portfolio_equity - free_usd)
+    deployed = 0.0
+    for sym, (qty, _) in positions.items():
+        mid = mid_prices.get(sym) or 0.0
+        if mid > 0 and is_tradable_position(qty, mid):
+            deployed += qty * mid
     deploy_room = max(
         0.0, portfolio_equity * KRAKEN_MAX_DEPLOYED_PCT - deployed
     )
