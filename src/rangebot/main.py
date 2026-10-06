@@ -6,7 +6,6 @@ import logging
 import os
 import time
 from datetime import datetime
-from decimal import Decimal
 from pathlib import Path
 
 from rangebot.config.settings import (
@@ -17,7 +16,6 @@ from rangebot.config.settings import (
     MAIN_RUN_MAX_RETRIES,
     MAIN_RUN_RETRY_WAIT_BASE_SEC,
     MIN_CAPITAL_PER_ASSET_USD,
-    MIN_SELLABLE_CRYPTO_QTY,
     MICRO_PRICE_EPS,
     ORDER_MAX_AGE_HOURS,
     ORDER_REPLACE_DELAY_SEC,
@@ -59,6 +57,7 @@ from rangebot.exchange.kraken import (
     norm_symbol,
     save_kraken_state,
 )
+from rangebot.exchange.base import ExchangeClient
 from rangebot.exchange.kraken.validation import OrderValidationError
 from rangebot.run_audit import KRAKEN_RUNS_JSONL, log_run_audit
 from rangebot.strategy.signals import (
@@ -112,6 +111,26 @@ log = logging.getLogger(__name__)
 def _is_kraken_below_minimum_order(exc: OrderValidationError) -> bool:
     """Kraken/ccxt minimum amount or minimum cost shortfall."""
     return "< minimum" in str(exc).lower()
+
+
+def _cancel_orphan_buy_orders(
+    client: ExchangeClient, kr_pool: list[str], selected: set[str]
+) -> int:
+    """Cancel open buys on pool symbols outside the current selection."""
+    cancelled = 0
+    for sym in kr_pool:
+        if sym in selected:
+            continue
+        for o in fetch_open_orders(client, sym):
+            if o.get("side") != "buy":
+                continue
+            try:
+                cancel_order_safe(client, str(o["id"]), sym)
+                log.info("  %s: Orphan buy geannuleerd (niet geselecteerd)", sym)
+                cancelled += 1
+            except Exception as e:  # noqa: BLE001
+                log.warning("  %s: orphan buy cancel mislukt: %s", sym, e)
+    return cancelled
 
 
 def _log_and_build_selection_debug(
@@ -213,6 +232,7 @@ def run_once() -> dict:
 
     held = symbols_with_balance(client, kr_pool)
     managed = list(dict.fromkeys(symbols + [s for s in held if s not in symbols]))
+    orphan_buys_cancelled = _cancel_orphan_buy_orders(client, kr_pool, set(symbols))
 
     portfolio_usd_pre = estimate_portfolio_usd(client, kr_pool)
     new_trades, entries_after_fills = check_and_notify_kraken_fills(
@@ -298,31 +318,27 @@ def run_once() -> dict:
             buy_level, sell_level = levels[symbol]
         pos_qty, avg_entry = positions.get(symbol, (0.0, 0.0))
         open_orders = fetch_open_orders(client, symbol)
+        # Stof of een restje onder de minimum-positie mag de buy niet blokkeren:
+        # anders blijft een oude buy-order eindeloos staan met cash en slot vast.
+        has_position = is_tradable_position(
+            pos_qty, mid_prices.get(symbol) or buy_level
+        )
 
-        if pos_qty <= 0:
-            for o in open_orders:
-                if o.get("side") == "sell":
-                    try:
-                        cancel_order_safe(client, str(o["id"]), symbol)
-                        log.info("  %s: Orphan sell geannuleerd", symbol)
-                    except Exception:
-                        pass
-
-        if pos_qty > 0 and Decimal(str(pos_qty)) < MIN_SELLABLE_CRYPTO_QTY:
+        if not has_position:
             for o in open_orders:
                 if o.get("side") == "sell":
                     try:
                         cancel_order_safe(client, str(o["id"]), symbol)
                         log.info(
-                            "  %s: Dust qty=%s, sell geannuleerd",
+                            "  %s: Sell geannuleerd (geen verkoopbare positie, qty=%s)",
                             symbol,
                             pos_qty,
                         )
                     except Exception:
                         pass
-            continue
+            open_orders = [o for o in open_orders if o.get("side") != "sell"]
 
-        if pos_qty > 0:
+        if has_position:
             existing_sell = next(
                 (
                     o
@@ -776,6 +792,7 @@ def run_once() -> dict:
             "symbols_selected": list(symbols),
             "symbols_held": sorted(held),
             "buy_levels_out_of_range": buy_levels_out_of_range,
+            "orphan_buys_cancelled": orphan_buys_cancelled,
             "max_buy_distance_pct": KRAKEN_MAX_BUY_DISTANCE_PCT,
             "pool_out_of_range": out_of_range,
             "selection_debug": selection_debug,
