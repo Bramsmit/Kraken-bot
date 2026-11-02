@@ -7,6 +7,7 @@ import pytest
 from rangebot.config.settings import LEVELS_LOOKBACK_DAYS
 from rangebot.strategy.range_strategy import (
     build_levels_scored_from_symbol_rows,
+    is_falling_knife,
     levels_passing_spread,
     levels_score_from_daily_rows,
     select_top_symbols_from_scores,
@@ -68,3 +69,52 @@ def test_select_top_symbols_keeps_positions_and_respects_cap_n():
     assert selected[0] == "BTC/USD"
     assert len(selected) == 2
     assert set(levels.keys()) == set(selected)
+
+
+def test_levels_score_penalizes_negative_drift_vs_positive_drift():
+    """Twee reeksen met exact dezelfde high/low, maar tegengestelde 3d-drift."""
+    rising = [
+        {"open": 100.0, "high": 110.0, "low": 100.0, "close": 103.0},
+        {"open": 103.0, "high": 110.0, "low": 100.0, "close": 106.0},
+        {"open": 106.0, "high": 110.0, "low": 100.0, "close": 109.0},
+    ]
+    falling = [
+        {"open": 109.0, "high": 110.0, "low": 100.0, "close": 106.0},
+        {"open": 106.0, "high": 110.0, "low": 100.0, "close": 103.0},
+        {"open": 103.0, "high": 110.0, "low": 100.0, "close": 100.0},
+    ]
+    res_up = levels_score_from_daily_rows(rising, min_spread_frac=0.02)
+    res_dn = levels_score_from_daily_rows(falling, min_spread_frac=0.02)
+    assert res_up is not None and res_dn is not None
+    # Zelfde buy/sell levels, maar de stijgende/herstellende range scoort hoger dan de vrije val
+    assert res_up[0] == pytest.approx(res_dn[0])
+    assert res_up[1] == pytest.approx(res_dn[1])
+    assert res_up[2] > res_dn[2] * 1.4
+
+
+def test_is_falling_knife_detects_steep_multi_day_crash():
+    crash_rows = [
+        {"open": 100.0, "high": 101.0, "low": 97.0, "close": 98.0},
+        {"open": 98.0, "high": 99.0, "low": 94.0, "close": 95.0},
+        {"open": 95.0, "high": 96.0, "low": 91.0, "close": 92.0},
+        {"open": 92.0, "high": 93.0, "low": 88.0, "close": 89.0},
+        {"open": 89.0, "high": 90.0, "low": 84.0, "close": 85.0},
+        {"open": 85.0, "high": 88.0, "low": 78.0, "close": 80.0},
+    ]
+    assert is_falling_knife(crash_rows) is True
+    scored = build_levels_scored_from_symbol_rows(
+        {"CRASH/USD": crash_rows}, ["CRASH/USD"], min_spread_frac=0.02
+    )
+    assert scored["CRASH/USD"][2] == 0.0
+    selected, _ = select_top_symbols_from_scores(scored, set(), n=3)
+    assert "CRASH/USD" not in selected
+
+
+def test_select_top_symbols_skips_zero_score_candidates():
+    scored = {
+        "GOOD/USD": (100.0, 106.0, 0.05),
+        "ZERO/USD": (100.0, 101.0, 0.0),
+    }
+    selected, _ = select_top_symbols_from_scores(scored, set(), n=3)
+    assert selected == ["GOOD/USD"]
+

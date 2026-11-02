@@ -17,6 +17,19 @@ Python spot bot: **daily range** op **Kraken** (USD-paren). Strategielogica in `
 - Parameters: `src/rangebot/config/settings.py`.
 - Optioneel: `RANGEBOT_LOG_FORMAT=json`, `RANGEBOT_LOG_LEVEL` — zie `.env.example`.
 
+### Belangrijkste strategie- & risicoparameters (nov 2026)
+
+| Parameter | Default | Toelichting |
+|-----------|---------|-------------|
+| `SYMBOLS_ACTIVE` | `4` | Max. aantal actieve symbolen tegelijk. Bestaande posities behouden hun slot; met 4 slots en max. 20% per positie blijft er bij 3 onderwater-posities nog een 4e koopslot vrij. |
+| `KRAKEN_MAX_DEPLOYED_PCT` | `0.65` | Maximaal 65% van de totale portefeuillewaarde (`estimate_portfolio_usd`) in posities; minimaal 35% blijft als USD-cashbuffer staan. |
+| `KRAKEN_MAX_POSITION_PCT` | `0.20` | Maximaal 20% van de portefeuillewaarde per individuele kooporder/positie (voorkomt dat één enkel resterend koopslot de volledige `deploy_room` opslokt). |
+| `KRAKEN_MAX_BUY_DISTANCE_PCT` | `0.10` | Als de marktprijs >10% boven het `buy_level` staat, wordt de kooporder opgegeven/overgeslagen zodat het slot naar een bereikbaar symbool gaat. |
+| `LEVELS_LOOKBACK_DAYS` | `3` | Rolling window (3 dagbars) voor gemiddelde `low` (`+0,5%` buy) en `high` (`-2,0%` sell). |
+| `RANGE_DRIFT_SENSITIVITY` | `3.0` | Drift-weging op de range-score (`spread_pct * (1 + range_pct) * max(0.10, 1 + 3 * drift)`): beloont herstellende/vlakke ranges en straft negatieve drift af. |
+| `FALLING_KNIFE_DROP_PCT` | `0.08` | Blokkeert nieuwe buys op symbolen die over `FALLING_KNIFE_LOOKBACK_DAYS` (5d) $\ge 8\%$ zijn gecrasht én onder hun gemiddelde slotkoers handelen (`score = 0`). |
+| `minimum_profitable_sell_price` | `entry × 1,009` | Sell-floor (`2 × 0,30%` maker-fee + `0,30%` netto marge): verkooporders worden nooit onder kostprijs + fees geplaatst en worden niet onnodig geannuleerd zolang de targetprijs niet $>1\%$ wijzigt. |
+
 ## Layout (actief)
 
 | Pad | Rol |

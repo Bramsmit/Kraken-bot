@@ -15,8 +15,10 @@ SYMBOL_POOL = [
     "CRV/USD", "DOGE/USD", "ETH/USD", "BTC/USD",
 ]
 
-# Hoeveel symbolen actief getrade worden (geselecteerd op winstgevendheid)
-SYMBOLS_ACTIVE = 3
+# Hoeveel symbolen actief getrade worden (geselecteerd op winstgevendheid).
+# Met 4 slots en max 20% per positie blokkeren 3 onderwater-posities niet alle
+# koopslots zolang er nog ruimte onder KRAKEN_MAX_DEPLOYED_PCT beschikbaar is.
+SYMBOLS_ACTIVE = 4
 
 # Voor backtest: eerste N uit pool (zelfde subset als live)
 SYMBOLS = SYMBOL_POOL[:SYMBOLS_ACTIVE]
@@ -42,6 +44,13 @@ LEVELS_LOOKBACK_DAYS = 3
 BUY_ABOVE_LOW_PCT = 0.005   # 0.5% boven de gem. low
 SELL_BELOW_HIGH_PCT = 0.02  # 2% onder de gem. high
 MIN_SPREAD_PCT = 0.02       # minimaal 2% spread tussen koop en verkoop
+
+# Drift-correctie op range-score en trend-crash filter (voorkomt dat vallende
+# messen met grote rode candles de hoogste range-score krijgen).
+RANGE_DRIFT_SENSITIVITY = 3.0
+RANGE_DRIFT_MIN_WEIGHT = 0.10
+FALLING_KNIFE_LOOKBACK_DAYS = 5
+FALLING_KNIFE_DROP_PCT = 0.08
 
 # Reference maker/taker (historische namen BITVAVO_*); typische retail-tier: maker 0,15%, taker 0,25%.
 BITVAVO_MAKER_FEE_RATE = 0.0015
@@ -88,10 +97,18 @@ KRAKEN_MIN_POSITION_NOTIONAL_USD = (
     RANGE_CRYPTO_ROUND_TRIP_FIXED_USD / MIN_SPREAD_PCT
 )  # $25 bij defaults
 
-# Maximaal deel van de portefeuille in posities. 0.45 liet op ~$350 equity
-# met één CRV-positie (~40%) te weinig ruimte over voor een $10-minimum buy.
+# Maximaal deel van de portefeuille in posities. Met 0.65 en max 0.20 per
+# symbool blijft er bij 3 onderwater-posities (~50-55% van equity) nog een 4e
+# koopslot vrij om de 45% cash-buffer te laten werken.
 KRAKEN_MAX_DEPLOYED_PCT = float(
-    _os_kraken_adapter.environ.get("KRAKEN_MAX_DEPLOYED_PCT", "0.60")
+    _os_kraken_adapter.environ.get("KRAKEN_MAX_DEPLOYED_PCT", "0.65")
+)
+
+# Maximaal deel van de portefeuille in één enkel symbool (zoals Alpaca's
+# SAFETY_MAX_ALLOC_PCT = 0.20). Voorkomt dat het laatst overgebleven koopslot
+# (buy_slots=1) 30-36% van de portefeuille in één munt stopt.
+KRAKEN_MAX_POSITION_PCT = float(
+    _os_kraken_adapter.environ.get("KRAKEN_MAX_POSITION_PCT", "0.20")
 )
 
 # Ligt het buy-level verder dan dit onder de markt, dan is de range omhoog

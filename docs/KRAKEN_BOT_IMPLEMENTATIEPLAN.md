@@ -625,4 +625,33 @@ Gebruik onderstaande prompt wanneer je een agent in de Kraken-repo start:
 
 ---
 
+---
+
+## 9. Update 2 november 2026 — Wiskundige evaluatie (Kraken vs. Alpaca) & Fase E
+
+Op 2 november 2026 is de live-historie (`16 jul – 2 nov 2026`, 178 Kraken-fills vs. 678 Alpaca-fills) en een 6-maands portefeuillesimulatie (`5 mei – 2 nov 2026`) doorgerekend:
+
+### 9.1 Belangrijkste bevindingen
+
+1. **Hoge netto marge per trade door de sell-floor (`fee_floor`):**
+   - Kraken haalde op voltooide roundtrips een **bruto marge van `+3,38%`** en een **netto marge van `+2,74%` per verhandelde dollar** (`+$124,64` gerealiseerde nettowinst over 126 FIFO-matches, piek-equity `$612,85` / `+22,6%` op 4 oktober).
+   - Ter vergelijking: Alpaca paper haalde `+1,31%` bruto per trade (en zou bij echte Kraken-fees van `0,536%` round-trip terugvallen naar `+0,77%` netto per trade).
+   - Ablatie-bewijs: het verwijderen van de `fee_floor` op Kraken-fees laat het 6-maands rendement instorten van `+40,41%` naar `-9,58%`. De `fee_floor` blijft dus strikt behouden.
+
+2. **Waarom Kraken na 22 oktober stilviel (3/3 Slot-Deadlock):**
+   - Bij `SYMBOLS_ACTIVE = 3` raakten alle 3 de slots bezet door onderwater-posities (`CRV/USD`, `ADA/USD`, `UNI/USD`, samen `$288,91` = `54,5%` van `$529,85` equity), terwijl `$240,95` (`45,5%`) werkloos in cash stond (`buy_slots = 0`).
+   - Daarnaast zaten er drie bugs/zwakke plekken in de code:
+     - **Bug 1 (Oversized laatste slot):** `capital_per` deelde `deploy_room` door `buy_slots = 1` zonder percentage-cap per symbool, waardoor de laatste buy-order tot `30–36%` van de portefeuille in één enkele munt stopte (`$216,52` in DOT op 2 okt; `$174,32` in CRV op 22 okt).
+     - **Bug 2 (Uurlijkse sell-cancel spam):** In `main.py` stond de `current_price < limit_sell * (1 - ORDER_STALE_PRICE_THRESHOLD)`-check vóór de `price_diff <= ORDER_UPDATE_THRESHOLD`-check. Daardoor werden onderwater-verkooporders op de `fee_floor` elk uur geannuleerd en op exact dezelfde prijs teruggeplaatst.
+     - **Bug 3 (Adverse selection bij crashes):** De range-score `spread_pct * (1 + range_pct)` was richtingsblind en gaf munten in vrije val (grote rode dagcandles) de hoogste score.
+
+### 9.2 Geïmplementeerde verbeteringen (Fase E — 2 nov 2026)
+
+| Onderdeel | Wijziging | Bewijs (6m / 110d backtest op 2026-data incl. Kraken-fees) |
+|---|---|---|
+| **E1. Positie-cap 20%** | `KRAKEN_MAX_POSITION_PCT = 0.20` in `settings.py` en `main.py` | Voorkomt `>20%` megabags bij `buy_slots=1`; Sharpe stijgt van `1,93` → `2,35`, MaxDD daalt van `-8,29%` → `-7,49%`. |
+| **E2. Drift-score & Falling-Knife filter** | `levels_score_from_daily_rows` weegt met `max(0.10, 1 + 3 * drift)`; `is_falling_knife` zet `score = 0` bij 5d-crash $\le -8\%$ onder gemiddelde close | Halveert ongerealiseerd verlies (`-43%`), verhoogt netto return van `+18,79%` → `+24,50%` (110d) en `+40,41%` → `+42,54%` (6m), Sharpe `1,93` → `2,96`. |
+| **E3. Fix sell-order cancel-spam** | In `main.py` eerst `price_diff <= ORDER_UPDATE_THRESHOLD` (`1%`) checken vóór stale-price replace | Houdt `fee_floor` sell-orders rustig in het boek met behoud van queue-prioriteit. |
+| **E4. Ontgrendeling 4e slot** | `SYMBOLS_ACTIVE = 4` en `KRAKEN_MAX_DEPLOYED_PCT = 0.65` (met `KRAKEN_MAX_POSITION_PCT = 0.20`) | Maakt direct 1 actief koopslot vrij uit de `$240,95` vrije cash zonder onderwater-posities met verlies te verkopen. |
+
 _Einde document._

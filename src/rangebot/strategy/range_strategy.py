@@ -8,10 +8,14 @@ from __future__ import annotations
 
 from rangebot.config.settings import (
     BUY_ABOVE_LOW_PCT,
+    FALLING_KNIFE_DROP_PCT,
+    FALLING_KNIFE_LOOKBACK_DAYS,
     LEVELS_LOOKBACK_DAYS,
     ORDER_MAX_AGE_HOURS,
     ORDER_STALE_PRICE_THRESHOLD,
     ORDER_UPDATE_THRESHOLD,
+    RANGE_DRIFT_MIN_WEIGHT,
+    RANGE_DRIFT_SENSITIVITY,
     SELL_BELOW_HIGH_PCT,
 )
 
@@ -45,8 +49,44 @@ def levels_score_from_daily_rows(
         (sell_level - buy_level) / buy_level if spread_ok and buy_level else 0.0
     )
     range_pct = (high - low) / low if low else 0.0
-    score = spread_pct * (1 + range_pct)
+    open_first = float(recent[0].get("open") or 0.0)
+    close_last = float(recent[-1].get("close") or 0.0)
+    if open_first > 0 and close_last > 0:
+        drift = (close_last - open_first) / open_first
+        drift_weight = max(
+            RANGE_DRIFT_MIN_WEIGHT,
+            1.0 + RANGE_DRIFT_SENSITIVITY * drift,
+        )
+    else:
+        drift_weight = 1.0
+    score = spread_pct * (1 + range_pct) * drift_weight
     return buy_level, sell_level, score
+
+
+def is_falling_knife(
+    rows: list[dict[str, float]],
+    *,
+    lookback_days: int = FALLING_KNIFE_LOOKBACK_DAYS,
+    drop_pct: float = FALLING_KNIFE_DROP_PCT,
+) -> bool:
+    """
+    Detecteer een versnellende meerdaagse neertrend (vallend mes).
+
+    True zodra het symbool over de afgelopen ``lookback_days`` meer dan
+    ``drop_pct`` is gedaald én onder het gemiddelde slot van de reeks sluit.
+    """
+    if len(rows) < lookback_days + 1:
+        return False
+    closes = [float(r.get("close") or 0.0) for r in rows if float(r.get("close") or 0.0) > 0]
+    if len(closes) < lookback_days + 1:
+        return False
+    ref_close = closes[-(lookback_days + 1)]
+    last_close = closes[-1]
+    if ref_close <= 0:
+        return False
+    ret = (last_close - ref_close) / ref_close
+    mean_close = sum(closes) / len(closes)
+    return ret <= -abs(drop_pct) and last_close < mean_close
 
 
 def levels_for_exit_only(
@@ -86,7 +126,10 @@ def build_levels_scored_from_symbol_rows(
             continue
         t = levels_score_from_daily_rows(rows, min_spread_frac)
         if t is not None:
-            result[symbol] = t
+            if is_falling_knife(rows):
+                result[symbol] = (t[0], t[1], 0.0)
+            else:
+                result[symbol] = t
     return result
 
 
@@ -187,8 +230,10 @@ def select_top_symbols_from_scores(
         reverse=True,
     )
     selected = list(symbols_with_positions)
-    for sym, (buy, sell, _) in sorted_by_score:
+    for sym, (buy, sell, score) in sorted_by_score:
         if sym in selected or len(selected) >= n:
+            continue
+        if score <= 0:
             continue
         if max_buy_distance_frac is not None and not is_buy_level_reachable(
             (current_prices or {}).get(sym), buy, max_buy_distance_frac

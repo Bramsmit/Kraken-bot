@@ -67,6 +67,7 @@ def run(monkeypatch):
         positions: dict[str, tuple[float, float]],
         open_orders: dict[str, list[dict[str, Any]]],
         pool: list[str],
+        free_usd: float = 110.0,
     ) -> FakeClient:
         client = FakeClient(open_orders, positions)
         held = [s for s, (q, _) in positions.items() if q > 0]
@@ -88,7 +89,7 @@ def run(monkeypatch):
             "get_positions_map": lambda c, syms, entries: {
                 s: positions.get(s, (0.0, 0.0)) for s in syms
             },
-            "get_buying_power_usd": lambda c: 110.0,
+            "get_buying_power_usd": lambda c: free_usd,
             "persist_entries_from_balances": lambda *a, **k: {},
             "save_kraken_state": lambda **k: None,
             "log_run_audit": lambda *a, **k: None,
@@ -158,3 +159,65 @@ def test_dust_balance_does_not_freeze_stale_buy(
     buys = [p for p in client.placed if p[0] == symbol and p[1] == "buy"]
     assert len(buys) == 1
     assert buys[0][3] == pytest.approx(levels[0], rel=1e-3)
+
+
+def test_sell_order_at_fee_floor_not_cancelled_when_price_far_below_target(
+    run,
+) -> None:
+    """
+    Bug-regressie: CRV/UNI/ADA staan ~30% onder hun fee_floor sell-order.
+    Omdat limit_sell == fee_floor == old_sell_price (price_diff == 0), mag de
+    bot NIET elk uur dezelfde sell-order annuleren en opnieuw plaatsen.
+    """
+    entry_px = 9.4014
+    # fee_floor = 9.4014 * (1 + 0.006 + 0.003) = 9.4860126
+    existing_sell_px = 9.4860
+    sell_ord = {
+        **_buy("uni-sell-floor", existing_sell_px, 8.188),
+        "side": "sell",
+        "timestamp": int((time.time() - 30 * 3600) * 1000),  # >24u oud
+    }
+    client = run(
+        symbols=["UNI/USD"],
+        levels={"UNI/USD": (7.05, 7.35)},  # sell_level (7.35) < fee_floor (9.486)
+        mids={"UNI/USD": 7.18},  # >30% onder limit_sell
+        positions={"UNI/USD": (8.188, entry_px)},
+        open_orders={"UNI/USD": [sell_ord]},
+        pool=["UNI/USD"],
+    )
+
+    assert ("UNI/USD", "uni-sell-floor") not in client.cancelled
+    sells_placed = [p for p in client.placed if p[0] == "UNI/USD" and p[1] == "sell"]
+    assert len(sells_placed) == 0
+
+
+def test_last_free_buy_slot_capped_by_max_position_pct(run) -> None:
+    """
+    Wanneer 1 koopslot vrij is en er veel vrije USD / deploy_room is, mag de
+    laatste buy-order niet >20% van de portefeuille ($600 * 0.20 = $120) pakken.
+    """
+    client = run(
+        symbols=["UNI/USD", "ADA/USD", "CRV/USD"],
+        levels={
+            "UNI/USD": (7.0, 7.5),
+            "ADA/USD": (0.20, 0.22),
+            "CRV/USD": (0.30, 0.33),
+        },
+        mids={"UNI/USD": 7.1, "ADA/USD": 0.20, "CRV/USD": 0.305},
+        positions={
+            "UNI/USD": (10.0, 7.1),   # ~$71
+            "ADA/USD": (350.0, 0.20),  # ~$70 (samen $141 deployed op $600 eq -> $249 deploy_room)
+        },
+        open_orders={},
+        pool=["UNI/USD", "ADA/USD", "CRV/USD"],
+        free_usd=300.0,
+    )
+
+    crv_buys = [p for p in client.placed if p[0] == "CRV/USD" and p[1] == "buy"]
+    assert len(crv_buys) == 1
+    _, _, qty, px = crv_buys[0]
+    notional = qty * px
+    # Zonder cap zou dit min($300 cash, $219 deploy_room) = $219 zijn;
+    # met KRAKEN_MAX_POSITION_PCT=0.20 op $600 is het exact begrensd op $120.
+    assert notional == pytest.approx(600.0 * 0.20, rel=1e-3)
+

@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from rangebot.config.settings import FILLED_ORDERS_LOOKBACK_HOURS
+from rangebot.config.settings import (
+    FILLED_ORDERS_LOOKBACK_HOURS,
+    KRAKEN_MAX_DEPLOYED_PCT,
+    KRAKEN_MAX_POSITION_PCT,
+    SYMBOLS_ACTIVE,
+)
 from rangebot.utils.paths import repository_root
 
 
@@ -24,3 +29,11 @@ def test_trade_workflow_cache_saves_after_hit() -> None:
     assert "key: kraken-trade-state-${{ runner.os }}\n" not in yml
     # Tweede restore-key zonder streepje pakt de bevroren Aug-22 cache.
     assert "kraken-trade-state-${{ runner.os }}\n" not in yml.split("restore-keys:")[-1]
+
+
+def test_slot_and_position_cap_prevent_three_bag_deadlock() -> None:
+    """Met >=4 actieve slots en max 20% per positie blokkeren 3 bags niet alle koopslots."""
+    assert SYMBOLS_ACTIVE >= 4
+    assert 0.10 <= KRAKEN_MAX_POSITION_PCT <= 0.20
+    assert KRAKEN_MAX_DEPLOYED_PCT >= 0.60
+

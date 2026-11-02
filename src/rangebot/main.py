@@ -11,6 +11,7 @@ from pathlib import Path
 from rangebot.config.settings import (
     KRAKEN_MAX_BUY_DISTANCE_PCT,
     KRAKEN_MAX_DEPLOYED_PCT,
+    KRAKEN_MAX_POSITION_PCT,
     KRAKEN_MAX_POSITION_VALUE_USD,
     KRAKEN_USE_FIXED_FEE_IN_SPREAD_GATE,
     MAIN_RUN_MAX_RETRIES,
@@ -269,6 +270,8 @@ def run_once() -> dict:
         n_symbols=max(1, buy_slots),
     )
     capital_per = min(capital_per, deploy_room / max(1, buy_slots))
+    if KRAKEN_MAX_POSITION_PCT > 0 and portfolio_equity > 0:
+        capital_per = min(capital_per, portfolio_equity * KRAKEN_MAX_POSITION_PCT)
 
     stats = {"placed": 0, "updated": 0, "unchanged": 0, "skipped": 0}
     buy_levels_out_of_range = 0
@@ -376,6 +379,27 @@ def run_once() -> dict:
                 current_price = mid_prices.get(symbol)
 
                 if (
+                    old_sell_price >= fee_floor
+                    and sell_level < fee_floor
+                    and price_diff <= ORDER_UPDATE_THRESHOLD
+                ):
+                    log.info(
+                        "  %s: Sell ongewijzigd @ $%.4f (floor beschermt tegen verlaging)",
+                        symbol,
+                        old_sell_price,
+                    )
+                    stats["unchanged"] += 1
+                    needs_new_sell = False
+                elif price_diff <= ORDER_UPDATE_THRESHOLD:
+                    log.info(
+                        "  %s: Sell ongewijzigd @ $%.4f (%.0fh)",
+                        symbol,
+                        old_sell_price,
+                        age_hours,
+                    )
+                    stats["unchanged"] += 1
+                    needs_new_sell = False
+                elif (
                     current_price
                     and old_sell_price
                     and current_price
@@ -419,18 +443,7 @@ def run_once() -> dict:
                     except Exception as e:
                         log.warning("  %s: cancel sell: %s", symbol, e)
                         needs_new_sell = False
-                elif (
-                    old_sell_price >= fee_floor
-                    and sell_level < fee_floor
-                ):
-                    log.info(
-                        "  %s: Sell ongewijzigd @ $%.4f (floor beschermt tegen verlaging)",
-                        symbol,
-                        old_sell_price,
-                    )
-                    stats["unchanged"] += 1
-                    needs_new_sell = False
-                elif price_diff > ORDER_UPDATE_THRESHOLD:
+                else:
                     try:
                         cancel_order_safe(
                             client, str(existing_sell["id"]), symbol
@@ -448,15 +461,6 @@ def run_once() -> dict:
                     except Exception as e:
                         log.warning("  %s: cancel sell: %s", symbol, e)
                         needs_new_sell = False
-                else:
-                    log.info(
-                        "  %s: Sell ongewijzigd @ $%.4f (%.0fh)",
-                        symbol,
-                        old_sell_price,
-                        age_hours,
-                    )
-                    stats["unchanged"] += 1
-                    needs_new_sell = False
 
             if needs_new_sell:
                 try:
