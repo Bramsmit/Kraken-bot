@@ -60,6 +60,7 @@ from rangebot.exchange.kraken import (
 )
 from rangebot.exchange.base import ExchangeClient
 from rangebot.exchange.kraken.validation import OrderValidationError
+from rangebot.live.equity_log import append_equity_row
 from rangebot.run_audit import KRAKEN_RUNS_JSONL, log_run_audit
 from rangebot.strategy.signals import (
     dry_run_from_env,
@@ -107,6 +108,9 @@ def bootstrap_cli_environment(repo_root: Path | None = None) -> None:
 
 bootstrap_cli_environment()
 log = logging.getLogger(__name__)
+
+# Vrije coins naast een bestaande sell onder dit bedrag zijn stof, geen gat.
+SELL_COVERAGE_MIN_USD = 1.0
 
 
 def _is_kraken_below_minimum_order(exc: OrderValidationError) -> bool:
@@ -180,7 +184,10 @@ def run_once() -> dict:
     Returns run stats ``{placed, updated, unchanged, skipped}`` or ``{}`` if skipped early.
     """
     if is_trading_paused():
-        log.info("run_once overgeslagen: trading staat op pauze (Telegram /pause).")
+        log.info(
+            "run_once overgeslagen: trading staat op pauze "
+            "(KRAKEN_TRADING_PAUSED of Telegram /pause)."
+        )
         return {}
 
     client = make_exchange()
@@ -342,6 +349,17 @@ def run_once() -> dict:
             open_orders = [o for o in open_orders if o.get("side") != "sell"]
 
         if has_position:
+            for o in open_orders:
+                if o.get("side") != "buy":
+                    continue
+                try:
+                    cancel_order_safe(client, str(o["id"]), symbol)
+                    log.info(
+                        "  %s: Buy geannuleerd (positie aangehouden, geen bijkoop)",
+                        symbol,
+                    )
+                except Exception as e:
+                    log.warning("  %s: cancel buy: %s", symbol, e)
             existing_sell = next(
                 (
                     o
@@ -351,7 +369,21 @@ def run_once() -> dict:
                 ),
                 None,
             )
-            entry = avg_entry if avg_entry > 0 else buy_level
+            if avg_entry <= 0:
+                # Zonder kostprijs zou de floor op het huidige buy-level vallen en
+                # stil een verlies realiseren; een bestaande sell blijft staan.
+                log.warning(
+                    "  %s: instap onbekend, sell niet geplaatst of aangepast",
+                    symbol,
+                )
+                if not existing_sell:
+                    send_telegram(
+                        f"⚠️ [Kraken] {symbol}: instap onbekend — geen sell "
+                        "geplaatst. Controleer data/kraken_state.json."
+                    )
+                stats["skipped"] += 1
+                continue
+            entry = avg_entry
             stop_price = stop_price_below_entry(entry)
             fee_floor = minimum_profitable_sell_price(
                 entry,
@@ -377,8 +409,23 @@ def run_once() -> dict:
                     else 1.0
                 )
                 current_price = mid_prices.get(symbol)
+                uncovered_q, _ = get_qty_for_symbol(client, symbol)
 
-                if (
+                if uncovered_q * limit_sell >= SELL_COVERAGE_MIN_USD:
+                    try:
+                        cancel_order_safe(
+                            client, str(existing_sell["id"]), symbol
+                        )
+                        log.info(
+                            "  %s: Sell vervangen (%s coins niet gedekt)",
+                            symbol,
+                            uncovered_q,
+                        )
+                        stats["updated"] += 1
+                    except Exception as e:
+                        log.warning("  %s: cancel sell: %s", symbol, e)
+                        needs_new_sell = False
+                elif (
                     old_sell_price >= fee_floor
                     and sell_level < fee_floor
                     and price_diff <= ORDER_UPDATE_THRESHOLD
@@ -762,6 +809,23 @@ def run_once() -> dict:
     portfolio_usd = estimate_portfolio_usd(client, kr_pool)
     buying_final = get_buying_power_usd(client)
     positions_final = get_positions_map(client, symbols, entries_final)
+    if not dry and portfolio_usd > 0:
+        held_final = get_positions_map(
+            client, sorted(set(held) | set(symbols)), entries_final
+        )
+        try:
+            append_equity_row(
+                equity_usd=portfolio_usd,
+                cash_usd=buying_final,
+                positions_usd={
+                    s: q * mid_prices[s]
+                    for s, (q, _) in held_final.items()
+                    if s in mid_prices
+                    and is_tradable_position(q, mid_prices[s])
+                },
+            )
+        except OSError as e:
+            log.warning("Equity-CSV niet geschreven: %s", e)
     levels_snap = {
         s: [round(float(levels[s][0]), 8), round(float(levels[s][1]), 8)]
         for s in symbols

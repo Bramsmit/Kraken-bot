@@ -7,11 +7,22 @@ jobs:
   status:
     runs-on: ubuntu-latest
     steps:
-      - name: Stuur dagelijkse heartbeat
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dependencies
+        run: pip install -e .
+
+      # Leest data/kraken_equity.csv (gecommit door elke trade-run): ⚠️ bij oude run,
+      # >10% onder piek of pauze; anders ✅ met kerncijfers.
+      - name: Heartbeat
         env:
+          KRAKEN_TRADING_PAUSED: ${{ vars.KRAKEN_TRADING_PAUSED }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-            -d "chat_id=${TELEGRAM_CHAT_ID}" \
-            -d "text=✅ Kraken range-bot: nog actief. Laatste dagelijkse check OK."
+        run: python -m rangebot.live.health_check

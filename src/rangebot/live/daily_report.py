@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-Dagelijks rapport: stuur portfoliowaarde + winst/verlies naar Telegram.
-Kraken USD (geschat uit vrije USD + watchlist-tickers).
+Dagelijks rapport naar Telegram: equity nu, verschil met 24u geleden, afstand tot
+de piek en cumulatieve Kraken-fees. Historie uit ``data/kraken_equity.csv``, fees uit
+de gecommitte state-snapshot; geen Actions-cache nodig.
 """
 
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
+import logging
+from datetime import datetime, timedelta, timezone
 
 from kraken.kraken_runtime import (
     estimate_portfolio_usd,
@@ -16,65 +17,59 @@ from kraken.kraken_runtime import (
     make_exchange,
 )
 from rangebot.config.settings import SYMBOL_POOL
+from rangebot.live.equity_log import EquityRow, read_equity_rows
 from rangebot.telegram.bot import send_telegram
-from rangebot.utils.paths import repository_root
 
-_DAY_STATE_PATH = repository_root() / ".kraken_day_state.json"
-
-
-def save_day_start(value: float) -> None:
-    """Sla de portfoliowaarde aan het begin van de dag op."""
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    data = {"date": today, "start_value": value}
-    _DAY_STATE_PATH.write_text(json.dumps(data))
+log = logging.getLogger(__name__)
 
 
-def load_day_start() -> tuple[str | None, float | None]:
-    """Start-van-dag waarde: (datum, waarde) of (None, None)."""
-    if not _DAY_STATE_PATH.exists():
-        return None, None
-    try:
-        data = json.loads(_DAY_STATE_PATH.read_text())
-        return data.get("date"), data.get("start_value")
-    except Exception:
-        return None, None
+def build_daily_report(
+    rows: list[EquityRow],
+    now: datetime,
+    *,
+    live_value: float | None,
+    cum_fees: float,
+) -> str:
+    value = live_value if live_value is not None else (
+        rows[-1].equity_usd if rows else 0.0
+    )
+    date_str = now.strftime("%d-%m-%Y")
+    lines = [f"📊 Dagrapport {date_str} (Kraken USD)", f"Equity:  ${value:.2f}"]
+
+    day_ago = now - timedelta(hours=24)
+    ref = next((r for r in reversed(rows) if r.timestamp <= day_ago), None)
+    if ref and ref.equity_usd > 0:
+        diff = value - ref.equity_usd
+        lines.append(f"24u:     ${diff:+.2f} ({diff / ref.equity_usd:+.1%})")
+    else:
+        lines.append("24u:     n.v.t. (nog geen historie)")
+
+    peak = max([r.equity_usd for r in rows] + [value])
+    if peak > 0:
+        lines.append(f"Piek:    ${peak:.2f} ({value / peak - 1:+.1%})")
+
+    lines.append(f"\n💸 Kraken-fees (cumulatief, volgens fills): ${cum_fees:.2f}")
+    return "\n".join(lines)
 
 
 def send_daily_report() -> None:
-    """Stuur eindrapport met start vs. huidige waarde en winst/verlies."""
-    exchange = make_exchange()
-    kr_pool = filter_kraken_usd_pool(exchange, SYMBOL_POOL)
-    value = estimate_portfolio_usd(exchange, kr_pool)
+    live_value: float | None
+    try:
+        exchange = make_exchange()
+        kr_pool = filter_kraken_usd_pool(exchange, SYMBOL_POOL)
+        live_value = estimate_portfolio_usd(exchange, kr_pool)
+    except Exception as e:
+        log.warning("Live equity ophalen mislukt, gebruik laatste CSV-regel: %s", e)
+        live_value = None
 
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    date_str = datetime.now(timezone.utc).strftime("%d-%m-%Y")
-
-    start_date, start_value = load_day_start()
-
-    if start_value and start_date == today:
-        diff = value - start_value
-        pct = (diff / start_value * 100) if start_value else 0
-        arrow = "📈" if diff >= 0 else "📉"
-        msg = (
-            f"{arrow} Dagrapport {date_str} (Kraken USD, schatting)\n"
-            f"Start:  ${start_value:.2f}\n"
-            f"Nu:     ${value:.2f}\n"
-            f"Winst:  ${diff:+.2f} ({pct:+.1f}%)"
-        )
-    else:
-        msg = (
-            f"📊 Dagrapport {date_str} (Kraken)\n"
-            f"Portfolio (schatting): ${value:.2f}"
-        )
-
-    cum_fees = get_kraken_cumulative_kraken_fees_usd()
-    msg += (
-        f"\n\n💸 Transactiekosten Kraken (cumulatief, volgens fills): "
-        f"${cum_fees:.2f}"
+    msg = build_daily_report(
+        read_equity_rows(),
+        datetime.now(timezone.utc),
+        live_value=live_value,
+        cum_fees=get_kraken_cumulative_kraken_fees_usd(),
     )
-
+    print(msg)
     send_telegram(msg)
-    save_day_start(value)
 
 
 def main() -> None:

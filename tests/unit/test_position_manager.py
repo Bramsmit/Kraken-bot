@@ -115,6 +115,45 @@ def test_persist_entries_keeps_cost_basis_when_sell_locks_qty() -> None:
     assert out["AAVE/USD"]["qty"] == pytest.approx(0.3444)
 
 
+def test_persist_entries_keeps_entry_when_mid_missing_this_run() -> None:
+    client = _client_with_locked_aave()
+    out = persist_entries_from_balances(
+        client,
+        ["AAVE/USD"],
+        {"AAVE/USD": {"qty": 0.3444, "entry": 125.66}},
+        {},
+    )
+    assert out["AAVE/USD"]["entry"] == pytest.approx(125.66)
+
+
+def test_persist_entries_keeps_entry_when_position_drops_below_min_notional() -> None:
+    client = _client_with_locked_aave()
+    out = persist_entries_from_balances(
+        client,
+        ["AAVE/USD"],
+        {"AAVE/USD": {"qty": 0.3444, "entry": 125.66}},
+        {"AAVE/USD": 60.0},  # ~$20, onder de $25 handelsdrempel
+    )
+    assert out["AAVE/USD"]["entry"] == pytest.approx(125.66)
+
+
+def test_persist_entries_keeps_opened_at() -> None:
+    client = _client_with_locked_aave()
+    out = persist_entries_from_balances(
+        client,
+        ["AAVE/USD"],
+        {
+            "AAVE/USD": {
+                "qty": 0.3444,
+                "entry": 125.66,
+                "opened_at": "2026-09-09T20:07:34+00:00",
+            }
+        },
+        {"AAVE/USD": 126.3},
+    )
+    assert out["AAVE/USD"]["opened_at"] == "2026-09-09T20:07:34+00:00"
+
+
 def test_persist_entries_does_not_invent_mid_as_entry() -> None:
     """Zonder bekende instap geen nep-kostprijs (= huidige koers)."""
     client = _client_with_locked_aave()

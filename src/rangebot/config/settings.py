@@ -79,8 +79,9 @@ KRAKEN_TAKER_FEE_RATE = float(
 KRAKEN_USE_FIXED_FEE_IN_SPREAD_GATE = False
 RANGE_CRYPTO_ESTIMATED_MAKER_ROUND_TRIP_PCT = KRAKEN_MAKER_FEE_RATE * 2
 # Journal/fills: uren terug naar trades. GitHub hourly cron heeft in de
-# praktijk gaten tot ~7u (soms een hele dag); 4u miste fills. Dedup op trade_id.
-FILLED_ORDERS_LOOKBACK_HOURS = 24
+# praktijk gaten tot ~9,5u (soms een hele dag); 4u miste fills. Dedup op
+# trade_id via notified_trade_ids in de gecommitte state-snapshot.
+FILLED_ORDERS_LOOKBACK_HOURS = 72
 
 # Per-symbol max position notional (USD). Default unset = no cap.
 _km_pos = _os_kraken_adapter.environ.get(

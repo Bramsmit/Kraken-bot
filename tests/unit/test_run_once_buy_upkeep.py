@@ -21,6 +21,8 @@ class FakeClient:
         self.positions = positions
         self.cancelled: list[tuple[str, str]] = []
         self.placed: list[tuple[str, str, float, float]] = []
+        self.telegram: list[str] = []
+        self.equity_rows: list[dict[str, Any]] = []
 
     def get_open_orders(self, symbol: str) -> list[dict[str, Any]]:
         return list(self.open_orders.get(symbol, []))
@@ -36,7 +38,16 @@ class FakeClient:
         return {"id": f"new-{symbol}-{side}"}
 
     def get_open_positions(self, symbols: list[str]) -> dict[str, tuple[float, float]]:
-        return {s: (self.positions.get(s, (0.0, 0.0))[0],) * 2 for s in symbols}
+        out = {}
+        for s in symbols:
+            total = self.positions.get(s, (0.0, 0.0))[0]
+            locked = sum(
+                float(o["remaining"])
+                for o in self.open_orders.get(s, [])
+                if o["side"] == "sell"
+            )
+            out[s] = (max(0.0, total - locked), total)
+        return out
 
     def maker_safe_limit_buy_price(self, symbol: str, desired: float) -> float:
         return desired
@@ -93,7 +104,8 @@ def run(monkeypatch):
             "persist_entries_from_balances": lambda *a, **k: {},
             "save_kraken_state": lambda **k: None,
             "log_run_audit": lambda *a, **k: None,
-            "send_telegram": lambda *a, **k: None,
+            "send_telegram": lambda msg, *a, **k: client.telegram.append(msg),
+            "append_equity_row": lambda **k: client.equity_rows.append(k),
             "ORDER_REPLACE_DELAY_SEC": 0,
         }
         for name, value in patches.items():
@@ -189,6 +201,85 @@ def test_sell_order_at_fee_floor_not_cancelled_when_price_far_below_target(
     assert ("UNI/USD", "uni-sell-floor") not in client.cancelled
     sells_placed = [p for p in client.placed if p[0] == "UNI/USD" and p[1] == "sell"]
     assert len(sells_placed) == 0
+
+
+def test_unknown_entry_places_no_sell_and_alerts(run) -> None:
+    client = run(
+        symbols=["CRV/USD"],
+        levels={"CRV/USD": (0.255, 0.27)},
+        mids={"CRV/USD": 0.262},
+        positions={"CRV/USD": (456.0, 0.0)},
+        open_orders={},
+        pool=["CRV/USD"],
+    )
+
+    assert not [p for p in client.placed if p[0] == "CRV/USD" and p[1] == "sell"]
+    assert any("CRV/USD" in m and "instap onbekend" in m for m in client.telegram)
+
+
+def test_unknown_entry_keeps_existing_sell(run) -> None:
+    sell = {**_buy("crv-sell", 0.3857, 456.0), "side": "sell"}
+    client = run(
+        symbols=["CRV/USD"],
+        levels={"CRV/USD": (0.255, 0.27)},
+        mids={"CRV/USD": 0.262},
+        positions={"CRV/USD": (456.0, 0.0)},
+        open_orders={"CRV/USD": [sell]},
+        pool=["CRV/USD"],
+    )
+
+    assert ("CRV/USD", "crv-sell") not in client.cancelled
+    assert not [p for p in client.placed if p[0] == "CRV/USD" and p[1] == "sell"]
+
+
+def test_resting_buy_cancelled_while_position_is_held(run) -> None:
+    sell = {**_buy("uni-sell", 9.486, 8.188), "side": "sell"}
+    client = run(
+        symbols=["UNI/USD"],
+        levels={"UNI/USD": (7.05, 7.35)},
+        mids={"UNI/USD": 7.18},
+        positions={"UNI/USD": (8.188, 9.4014)},
+        open_orders={"UNI/USD": [sell, _buy("uni-buy-rest", 7.05, 4.0)]},
+        pool=["UNI/USD"],
+    )
+
+    assert ("UNI/USD", "uni-buy-rest") in client.cancelled
+    assert ("UNI/USD", "uni-sell") not in client.cancelled
+
+
+def test_sell_replaced_when_it_does_not_cover_all_held_qty(run) -> None:
+    sell = {**_buy("uni-sell", 9.486, 8.188), "side": "sell"}
+    client = run(
+        symbols=["UNI/USD"],
+        levels={"UNI/USD": (7.05, 7.35)},
+        mids={"UNI/USD": 7.18},
+        positions={"UNI/USD": (12.0, 9.4014)},
+        open_orders={"UNI/USD": [sell]},
+        pool=["UNI/USD"],
+    )
+
+    assert ("UNI/USD", "uni-sell") in client.cancelled
+    sells = [p for p in client.placed if p[0] == "UNI/USD" and p[1] == "sell"]
+    assert len(sells) == 1
+    assert sells[0][2] == pytest.approx(12.0)
+    assert sells[0][3] == pytest.approx(9.486, rel=1e-3)
+
+
+def test_run_appends_equity_row_with_all_held_positions(run) -> None:
+    sell = {**_buy("uni-sell", 9.486, 8.188), "side": "sell"}
+    client = run(
+        symbols=["ADA/USD"],
+        levels={"ADA/USD": (0.2563, 0.2703)},
+        mids={"ADA/USD": 0.2715, "UNI/USD": 7.18},
+        positions={"UNI/USD": (8.188, 9.4014)},
+        open_orders={"UNI/USD": [sell]},
+        pool=["ADA/USD", "UNI/USD"],
+    )
+
+    assert len(client.equity_rows) == 1
+    row = client.equity_rows[0]
+    assert row["equity_usd"] == pytest.approx(600.0)
+    assert row["positions_usd"] == {"UNI/USD": pytest.approx(8.188 * 7.18)}
 
 
 def test_last_free_buy_slot_capped_by_max_position_pct(run) -> None:

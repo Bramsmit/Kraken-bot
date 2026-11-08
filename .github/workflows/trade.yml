@@ -18,7 +18,8 @@ on:
 
 concurrency:
   group: kraken-hourly-trade
-  cancel-in-progress: true
+  # Niet afbreken: een run kan net tussen cancel en nieuwe order zitten.
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -72,11 +73,13 @@ jobs:
           KRAKEN_API_SECRET: ${{ secrets.KRAKEN_API_SECRET }}
           KRAKEN_DRY_RUN: ${{ vars.KRAKEN_DRY_RUN }}
           KRAKEN_POST_ONLY: ${{ vars.KRAKEN_POST_ONLY || 'true' }}
+          # Noodknop: repository variable KRAKEN_TRADING_PAUSED=true → run doet niets.
+          KRAKEN_TRADING_PAUSED: ${{ vars.KRAKEN_TRADING_PAUSED }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python -m kraken.live_trader
 
-      - name: Export en bewaar trade-log in repo
+      - name: Export en bewaar trade-log, state en equity in repo
         if: always()
         continue-on-error: true
         run: |
@@ -85,13 +88,15 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git pull --rebase origin main 2>/dev/null || true
-          git add data/kraken_trades.jsonl data/kraken_trades.csv
+          git pull --rebase --autostash origin main 2>/dev/null || true
+          for f in data/kraken_trades.jsonl data/kraken_trades.csv data/kraken_state.json data/kraken_equity.csv; do
+            if [ -f "$f" ]; then git add "$f"; fi
+          done
           if git diff --cached --quiet; then
-            echo "Geen nieuwe trades, skip push."
+            echo "Niets nieuws, skip push."
             exit 0
           fi
-          git commit -m "chore: trade log $(date -u +%Y-%m-%dT%H:%MZ) [skip ci]"
+          git commit -m "chore: trade log + state $(date -u +%Y-%m-%dT%H:%MZ) [skip ci]"
 
           for attempt in 1 2 3; do
             if git push origin HEAD; then
@@ -99,7 +104,7 @@ jobs:
               exit 0
             fi
             echo "Push poging $attempt mislukt, rebase en opnieuw..."
-            git pull --rebase origin main 2>/dev/null || true
+            git pull --rebase --autostash origin main 2>/dev/null || true
             sleep $((attempt * 5))
           done
           echo "⚠️  Push na 3 pogingen mislukt; data blijft in cache/artifact."
@@ -116,6 +121,8 @@ jobs:
             kraken_bot_trades.jsonl
             data/kraken_trades.jsonl
             data/kraken_trades.csv
+            data/kraken_state.json
+            data/kraken_equity.csv
             .kraken_trade_state.json
           if-no-files-found: ignore
           retention-days: 14

@@ -1,9 +1,10 @@
-"""Pause/resume trading from Telegram (local JSON, not committed by default)."""
+"""Pause/resume trading: Telegram (local JSON) or KRAKEN_TRADING_PAUSED (Actions variable)."""
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,9 @@ def control_state_path() -> Path:
 
 
 def is_trading_paused() -> bool:
+    env = os.environ.get("KRAKEN_TRADING_PAUSED", "").strip().lower()
+    if env in ("1", "true", "yes"):
+        return True
     path = control_state_path()
     if not path.exists():
         return False

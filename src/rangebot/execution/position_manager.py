@@ -145,22 +145,24 @@ def persist_entries_from_balances(
     """
     Persist held qty + known entry. Never invent an entry from the mid price:
     that made the sell-floor compare against today's print instead of cost.
+
+    A known entry is kept while any sellable qty remains, independent of price:
+    a missing mid or a dip under the trading minimum must not erase cost basis.
     """
+    _ = mid_prices
     out: dict[str, Any] = {}
     for sym in symbols:
         free_q, tot_q = get_qty_for_symbol(client, sym)
         qty = held_qty(free_q, tot_q)
-        if qty <= 0:
-            continue
-        ref_px = float(mid_prices.get(sym) or 0)
-        if not is_tradable_position(qty, ref_px):
+        if qty <= 0 or Decimal(str(qty)) < MIN_SELLABLE_CRYPTO_QTY:
             continue
         mem = entries_memory.get(sym) or {}
         entry = float(mem.get("entry") or 0)
         if entry <= 0:
             continue
         rec: dict[str, Any] = {"qty": float(qty), "entry": entry}
-        if mem.get("buy_fee_usd") is not None:
-            rec["buy_fee_usd"] = mem["buy_fee_usd"]
+        for key in ("buy_fee_usd", "opened_at"):
+            if mem.get(key) is not None:
+                rec[key] = mem[key]
         out[sym] = rec
     return out

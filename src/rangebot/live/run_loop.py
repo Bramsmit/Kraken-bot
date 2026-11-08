@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 # Kraken-package staat op repo-root (naast ``src/``); pad vroeg zetten.
@@ -19,36 +19,15 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 os.chdir(_REPO_ROOT)
 sys.path.insert(0, str(_REPO_ROOT))
 
-from kraken.kraken_runtime import (  # noqa: E402
-    estimate_portfolio_usd,
-    filter_kraken_usd_pool,
-    make_exchange,
-)
 from kraken.live_trader import run_once  # noqa: E402
-from rangebot.config.settings import SYMBOL_POOL  # noqa: E402
-from rangebot.live.daily_report import (  # noqa: E402
-    load_day_start,
-    save_day_start,
-    send_daily_report,
-)
+from rangebot.live.daily_report import send_daily_report  # noqa: E402
 from rangebot.telegram.bot import send_telegram  # noqa: E402
 
 INTERVAL_MINUTEN = 60
 DAGRAPPORT_UUR = 22
 
 
-def _init_day_start() -> None:
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    start_date, _ = load_day_start()
-    if start_date != today:
-        ex = make_exchange()
-        pool = filter_kraken_usd_pool(ex, SYMBOL_POOL)
-        save_day_start(estimate_portfolio_usd(ex, pool))
-
-
 def main() -> None:
-    _init_day_start()
-
     send_telegram(
         "🟢 Kraken bot gestart "
         f"(elke {INTERVAL_MINUTEN} min | dagrapport om {DAGRAPPORT_UUR}:00)"

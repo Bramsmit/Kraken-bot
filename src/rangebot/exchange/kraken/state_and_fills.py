@@ -70,7 +70,23 @@ def _state_path() -> Path:
     return repository_root() / ".kraken_trade_state.json"
 
 
+def state_snapshot_path() -> Path:
+    """Committed copy in ``data/``: survives Actions-cache eviction."""
+    return repository_root() / "data" / "kraken_state.json"
+
+
 _STATE_CUM_FEES = "cumulative_kraken_fees_usd"
+
+
+def _read_state_file(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text())
+    except Exception as e:  # noqa: BLE001
+        log.warning("Kraken state %s onleesbaar: %s", path.name, e)
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def _load_state() -> dict[str, Any]:
@@ -79,21 +95,19 @@ def _load_state() -> dict[str, Any]:
         "notified_trade_ids": [],
         _STATE_CUM_FEES: 0.0,
     }
-    path = _state_path()
-    if not path.exists():
+    candidates = [
+        d
+        for d in (_read_state_file(_state_path()), _read_state_file(state_snapshot_path()))
+        if d is not None
+    ]
+    if not candidates:
         return base.copy()
-    try:
-        data = json.loads(path.read_text())
-        out = base.copy()
-        out["entries"] = data.get("entries", {})
-        out["notified_trade_ids"] = data.get("notified_trade_ids", [])
-        if _STATE_CUM_FEES in data:
-            out[_STATE_CUM_FEES] = float(data.get(_STATE_CUM_FEES) or 0)
-        else:
-            out[_STATE_CUM_FEES] = 0.0
-        return out
-    except Exception:
-        return base.copy()
+    data = max(candidates, key=lambda d: str(d.get("updated_at") or ""))
+    out = base.copy()
+    out["entries"] = data.get("entries", {})
+    out["notified_trade_ids"] = data.get("notified_trade_ids", [])
+    out[_STATE_CUM_FEES] = float(data.get(_STATE_CUM_FEES) or 0)
+    return out
 
 
 def save_kraken_state(
@@ -102,7 +116,6 @@ def save_kraken_state(
     notified_trade_ids: list[str] | None = None,
     cumulative_kraken_fees_usd: float | None = None,
 ) -> None:
-    path = _state_path()
     state = _load_state()
     if entries is not None:
         state["entries"] = entries
@@ -110,10 +123,14 @@ def save_kraken_state(
         state["notified_trade_ids"] = notified_trade_ids[-500:]
     if cumulative_kraken_fees_usd is not None:
         state[_STATE_CUM_FEES] = float(cumulative_kraken_fees_usd)
-    try:
-        path.write_text(json.dumps(state, indent=2))
-    except Exception as e:
-        log.warning("Kraken state schrijven mislukt: %s", e)
+    state["updated_at"] = datetime.now(timezone.utc).isoformat()
+    payload = json.dumps(state, indent=2)
+    for path in (_state_path(), state_snapshot_path()):
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(payload)
+        except Exception as e:  # noqa: BLE001
+            log.warning("Kraken state schrijven mislukt (%s): %s", path.name, e)
 
 
 def get_kraken_cumulative_kraken_fees_usd() -> float:
@@ -225,6 +242,13 @@ def check_and_notify_kraken_fills(
                     )
 
             buy_fee_this: float | None = None
+            ts_iso = (
+                datetime.fromtimestamp(
+                    ts_ms / 1000, tz=timezone.utc
+                ).isoformat()
+                if ts_ms
+                else None
+            )
 
             if side == "buy":
                 add_fee = fee_usd if fee_usd is not None else 0.0
@@ -243,12 +267,14 @@ def check_and_notify_kraken_fills(
                         "qty": new_qty,
                         "entry": new_entry,
                         "buy_fee_usd": prev_bf + add_fee,
+                        "opened_at": prev.get("opened_at") or ts_iso,
                     }
                 else:
                     entries[sym] = {
                         "qty": qty,
                         "entry": price,
                         "buy_fee_usd": add_fee,
+                        "opened_at": ts_iso,
                     }
                 profit = None
                 entry_price_for_log = None
@@ -280,15 +306,9 @@ def check_and_notify_kraken_fills(
                             "qty": remain_q,
                             "entry": entries[sym].get("entry"),
                             "buy_fee_usd": max(0.0, prev_bf - buy_fee_this),
+                            "opened_at": entries[sym].get("opened_at"),
                         }
 
-            ts_iso = (
-                datetime.fromtimestamp(
-                    ts_ms / 1000, tz=timezone.utc
-                ).isoformat()
-                if ts_ms
-                else None
-            )
             append_kraken_fill_audit(
                 {
                     "logged_at": datetime.now(timezone.utc).isoformat(),

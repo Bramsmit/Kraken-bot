@@ -7,19 +7,14 @@ jobs:
   report:
     runs-on: ubuntu-latest
     steps:
+      # Historie (equity-CSV) en fees (state-snapshot) staan gecommit in data/.
       - uses: actions/checkout@v4
-
-      - name: Herstel Kraken trade state (fee-tracking)
-        uses: actions/cache@v4
-        with:
-          path: .kraken_trade_state.json
-          key: kraken-daily-report-state-${{ runner.os }}-${{ github.run_id }}
-          restore-keys: |
-            kraken-trade-state-${{ runner.os }}-
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
       - name: Install dependencies
         run: pip install -e .
