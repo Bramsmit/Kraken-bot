@@ -48,7 +48,8 @@ from rangebot.execution.position_manager import (
     ref_notional_for_range_selection,
 )
 from rangebot.execution.risk_manager import (
-    minimum_profitable_sell_price,
+    calculate_aged_sell_floor,
+    should_force_exit_position,
     stop_price_below_entry,
 )
 from rangebot.exchange.kraken import (
@@ -443,19 +444,52 @@ def run_once() -> dict:
                 continue
             entry = avg_entry
             stop_price = stop_price_below_entry(entry)
-            fee_floor = minimum_profitable_sell_price(
-                entry,
-                maker_round_trip_pct=RANGE_CRYPTO_ESTIMATED_MAKER_ROUND_TRIP_PCT,
-            )
-            limit_sell = max(sell_level, fee_floor)
-            if limit_sell > sell_level:
-                log.info(
-                    "  %s: sell-floor $%.4f (entry $%.4f), range-level $%.4f → floor actief",
+            
+            # Ophalen opened_at voor aged floor
+            opened_at_iso = entries_after_fills.get(symbol, {}).get("opened_at")
+            
+            # Hard stop-loss check
+            current_price_for_stop = mid_prices.get(symbol)
+            if should_force_exit_position(current_price_for_stop, entry):
+                log.warning(
+                    "  %s: HARD STOP-LOSS geraakt @ $%.4f (entry $%.4f, drempel %.1f%%)",
                     symbol,
-                    limit_sell,
+                    current_price_for_stop,
                     entry,
-                    sell_level,
+                    (current_price_for_stop / entry - 1) * 100 if current_price_for_stop else 0,
                 )
+                send_telegram(
+                    f"🛑 [Kraken] {symbol}: Hard stop-loss @ ${current_price_for_stop:.4f} "
+                    f"(entry ${entry:.4f})"
+                )
+                # Zet sell op huidige prijs (taker-exit, accepteer verlies)
+                limit_sell = current_price_for_stop
+            else:
+                # Normale flow met aged floor
+                fee_floor, is_aged = calculate_aged_sell_floor(
+                    entry,
+                    maker_round_trip_pct=RANGE_CRYPTO_ESTIMATED_MAKER_ROUND_TRIP_PCT,
+                    opened_at_iso=opened_at_iso,
+                )
+                limit_sell = max(sell_level, fee_floor)
+                
+                if is_aged:
+                    log.info(
+                        "  %s: AGED sell-floor $%.4f (entry $%.4f, opened %s), range $%.4f",
+                        symbol,
+                        fee_floor,
+                        entry,
+                        opened_at_iso or "unknown",
+                        sell_level,
+                    )
+                elif limit_sell > sell_level:
+                    log.info(
+                        "  %s: sell-floor $%.4f (entry $%.4f), range-level $%.4f → floor actief",
+                        symbol,
+                        limit_sell,
+                        entry,
+                        sell_level,
+                    )
             needs_new_sell = True
 
             if existing_sell:
