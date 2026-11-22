@@ -39,12 +39,14 @@ def submit_limit_sell_all_free(
     client: ExchangeClient,
     symbol: str,
     price: float,
+    *,
+    params: dict | None = None,
 ) -> dict[str, Any] | None:
     free_q, _ = get_qty_for_symbol(client, symbol)
     if free_q <= 0:
         raise ValueError(f"Geen vrije qty voor sell {symbol}")
     return client.place_order(
-        symbol, "sell", "limit", free_q, price, params=None
+        symbol, "sell", "limit", free_q, price, params=params
     )
 
 

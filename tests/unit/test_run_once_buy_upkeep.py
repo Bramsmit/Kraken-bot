@@ -21,6 +21,7 @@ class FakeClient:
         self.positions = positions
         self.cancelled: list[tuple[str, str]] = []
         self.placed: list[tuple[str, str, float, float]] = []
+        self.place_params: list[dict | None] = []
         self.telegram: list[str] = []
         self.equity_rows: list[dict[str, Any]] = []
 
@@ -35,6 +36,7 @@ class FakeClient:
 
     def place_order(self, symbol, side, order_type, amount, price, *, params=None):
         self.placed.append((symbol, side, float(amount), float(price)))
+        self.place_params.append(params)
         return {"id": f"new-{symbol}-{side}"}
 
     def get_open_positions(self, symbols: list[str]) -> dict[str, tuple[float, float]]:
@@ -79,6 +81,8 @@ def run(monkeypatch):
         open_orders: dict[str, list[dict[str, Any]]],
         pool: list[str],
         free_usd: float = 110.0,
+        entries: dict | None = None,
+        block_buys: bool = False,
     ) -> FakeClient:
         client = FakeClient(open_orders, positions)
         held = [s for s, (q, _) in positions.items() if q > 0]
@@ -95,7 +99,9 @@ def run(monkeypatch):
             "_log_and_build_selection_debug": lambda *a, **k: {},
             "symbols_with_balance": lambda c, p: list(held),
             "estimate_portfolio_usd": lambda c, p: 600.0,
-            "check_and_notify_kraken_fills": lambda c, p, portfolio_usd: (0, {}),
+            "check_and_notify_kraken_fills": lambda c, p, portfolio_usd: (
+                0, entries or {}
+            ),
             "get_mid_price": lambda c, s: mids.get(s),
             "get_positions_map": lambda c, syms, entries: {
                 s: positions.get(s, (0.0, 0.0)) for s in syms
@@ -106,6 +112,7 @@ def run(monkeypatch):
             "log_run_audit": lambda *a, **k: None,
             "send_telegram": lambda msg, *a, **k: client.telegram.append(msg),
             "append_equity_row": lambda **k: client.equity_rows.append(k),
+            "new_buys_paused": lambda rows: block_buys,
             "ORDER_REPLACE_DELAY_SEC": 0,
         }
         for name, value in patches.items():
@@ -280,6 +287,94 @@ def test_run_appends_equity_row_with_all_held_positions(run) -> None:
     row = client.equity_rows[0]
     assert row["equity_usd"] == pytest.approx(600.0)
     assert row["positions_usd"] == {"UNI/USD": pytest.approx(8.188 * 7.18)}
+
+
+def test_fallen_bag_keeps_its_sell_and_is_not_averaged_down(run) -> None:
+    """Marktwaarde onder $25, verlies nog onder 60%: sell blijft, geen bijkoop."""
+    sell = {**_buy("sol-sell", 30.27, 1.0), "side": "sell"}
+    client = run(
+        symbols=["SOL/USD"],
+        levels={"SOL/USD": (19.0, 22.0)},
+        mids={"SOL/USD": 20.0},
+        positions={"SOL/USD": (1.0, 30.0)},
+        open_orders={"SOL/USD": [sell]},
+        pool=["SOL/USD"],
+        entries={"SOL/USD": {"qty": 1.0, "entry": 30.0}},
+    )
+
+    assert ("SOL/USD", "sol-sell") not in client.cancelled
+    assert not [p for p in client.placed if p[0] == "SOL/USD" and p[1] == "buy"]
+
+
+def test_new_position_past_loss_limit_sells_below_entry(run) -> None:
+    sell = {**_buy("sol-sell", 100.9, 1.0), "side": "sell"}
+    client = run(
+        symbols=["SOL/USD"],
+        levels={"SOL/USD": (70.0, 90.0)},
+        mids={"SOL/USD": 80.0},
+        positions={"SOL/USD": (1.0, 100.0)},
+        open_orders={"SOL/USD": [sell]},
+        pool=["SOL/USD"],
+        entries={
+            "SOL/USD": {
+                "qty": 1.0,
+                "entry": 100.0,
+                "opened_at": "2026-11-20T00:00:00+00:00",
+            }
+        },
+    )
+
+    assert ("SOL/USD", "sol-sell") in client.cancelled
+    sells = [p for p in client.placed if p[0] == "SOL/USD" and p[1] == "sell"]
+    assert len(sells) == 1
+    assert sells[0][3] == pytest.approx(80.0 * 0.997, rel=1e-3)
+    assert client.place_params[-1] == {"postOnly": False}
+    assert any("beschermende verkoop" in m for m in client.telegram)
+
+
+def test_legacy_bag_is_not_sold_at_todays_loss(run) -> None:
+    sell = {**_buy("crv-sell", 0.3857, 456.0), "side": "sell"}
+    client = run(
+        symbols=["CRV/USD"],
+        levels={"CRV/USD": (0.17, 0.20)},
+        mids={"CRV/USD": 0.18},
+        positions={"CRV/USD": (456.0, 0.3822)},
+        open_orders={"CRV/USD": [sell]},
+        pool=["CRV/USD"],
+        entries={"CRV/USD": {"qty": 456.0, "entry": 0.3822}},
+    )
+    assert ("CRV/USD", "crv-sell") not in client.cancelled
+    assert not any("beschermende verkoop" in m for m in client.telegram)
+
+
+def test_legacy_bag_sells_when_loss_reaches_sixty_percent(run) -> None:
+    sell = {**_buy("crv-sell", 0.3857, 456.0), "side": "sell"}
+    client = run(
+        symbols=["CRV/USD"],
+        levels={"CRV/USD": (0.14, 0.16)},
+        mids={"CRV/USD": 0.15},
+        positions={"CRV/USD": (456.0, 0.3822)},
+        open_orders={"CRV/USD": [sell]},
+        pool=["CRV/USD"],
+        entries={"CRV/USD": {"qty": 456.0, "entry": 0.3822}},
+    )
+    sells = [p for p in client.placed if p[1] == "sell"]
+    assert len(sells) == 1
+    assert sells[0][3] < 0.3822
+    assert sells[0][3] == pytest.approx(0.15 * 0.997, rel=1e-3)
+
+
+def test_drawdown_pauses_a_new_buy(run) -> None:
+    client = run(
+        symbols=["SOL/USD"],
+        levels={"SOL/USD": (70.0, 90.0)},
+        mids={"SOL/USD": 71.0},
+        positions={},
+        open_orders={},
+        pool=["SOL/USD"],
+        block_buys=True,
+    )
+    assert not [p for p in client.placed if p[1] == "buy"]
 
 
 def test_last_free_buy_slot_capped_by_max_position_pct(run) -> None:

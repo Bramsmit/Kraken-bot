@@ -59,6 +59,16 @@ def append_equity_row(
         )
 
 
+def new_buys_paused(rows: list[EquityRow], limit: float = 0.15) -> bool:
+    """Geen nieuwe aankopen als de laatste equity meer dan ``limit`` onder de piek staat."""
+    if not rows:
+        return False
+    peak = max(row.equity_usd for row in rows)
+    if peak <= 0:
+        return False
+    return rows[-1].equity_usd <= peak * (1 - limit)
+
+
 def read_equity_rows() -> list[EquityRow]:
     path = equity_csv_path()
     if not path.exists():

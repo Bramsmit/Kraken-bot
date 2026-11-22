@@ -25,6 +25,18 @@ def is_tradable_position(qty: float, ref_price: float) -> bool:
     return qty * float(ref_price or 0) >= KRAKEN_MIN_POSITION_NOTIONAL_USD
 
 
+def is_open_position(qty: float, mark_price: float, entry_price: float = 0.0) -> bool:
+    """Een echte positie, ook als de marktwaarde onder $25 is gezakt.
+
+    De kostenbasis houdt het slot en de sell vast. Alleen de marktprijs
+    gebruiken maakte van zo'n positie "geen positie": de sell werd
+    geannuleerd en de bot kon bijkopen.
+    """
+    return is_tradable_position(qty, mark_price) or is_tradable_position(
+        qty, entry_price
+    )
+
+
 def held_qty(free: float, total: float) -> float:
     """Qty we still own, including coins locked in open sell orders."""
     tot = float(total or 0)

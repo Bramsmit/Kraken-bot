@@ -66,6 +66,18 @@ def fetch_open_orders(client: ExchangeClient, symbol: str) -> list[dict[str, Any
         return []
 
 
+def entry_prices_from_state() -> dict[str, float]:
+    """Instapprijs per symbool uit de bewaarde state. 0 als die ontbreekt."""
+    entries = _load_state().get("entries") or {}
+    out: dict[str, float] = {}
+    if not isinstance(entries, dict):
+        return out
+    for sym, ent in entries.items():
+        if isinstance(ent, dict):
+            out[norm_symbol(sym)] = float(ent.get("entry") or 0)
+    return out
+
+
 def _state_path() -> Path:
     return repository_root() / ".kraken_trade_state.json"
 

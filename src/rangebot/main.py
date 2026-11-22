@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from rangebot.config.settings import (
@@ -41,6 +41,7 @@ from rangebot.execution.position_manager import (
     get_buying_power_usd,
     get_positions_map,
     get_qty_for_symbol,
+    is_open_position,
     is_tradable_position,
     persist_entries_from_balances,
     capital_per_active_symbol_usd,
@@ -60,13 +61,14 @@ from rangebot.exchange.kraken import (
 )
 from rangebot.exchange.base import ExchangeClient
 from rangebot.exchange.kraken.validation import OrderValidationError
-from rangebot.live.equity_log import append_equity_row
+from rangebot.live.equity_log import append_equity_row, new_buys_paused, read_equity_rows
 from rangebot.run_audit import KRAKEN_RUNS_JSONL, log_run_audit
 from rangebot.strategy.signals import (
     dry_run_from_env,
     select_top_symbols_for_range,
     symbols_with_balance,
 )
+from rangebot.strategy.exit_shadow import protective_exit_reason
 from rangebot.strategy.range_strategy import (
     BUY_ORDER_ABANDON,
     BUY_ORDER_REPLACE_AGED,
@@ -264,9 +266,9 @@ def run_once() -> dict:
         if not is_tradable_position(*positions.get(sym, (0.0, 0.0)))
     )
     deployed = 0.0
-    for sym, (qty, _) in positions.items():
+    for sym, (qty, entry) in positions.items():
         mid = mid_prices.get(sym) or 0.0
-        if mid > 0 and is_tradable_position(qty, mid):
+        if mid > 0 and is_open_position(qty, mid, entry):
             deployed += qty * mid
     deploy_room = max(
         0.0, portfolio_equity * KRAKEN_MAX_DEPLOYED_PCT - deployed
@@ -330,8 +332,8 @@ def run_once() -> dict:
         open_orders = fetch_open_orders(client, symbol)
         # Stof of een restje onder de minimum-positie mag de buy niet blokkeren:
         # anders blijft een oude buy-order eindeloos staan met cash en slot vast.
-        has_position = is_tradable_position(
-            pos_qty, mid_prices.get(symbol) or buy_level
+        has_position = is_open_position(
+            pos_qty, mid_prices.get(symbol) or buy_level, avg_entry
         )
 
         if not has_position:
@@ -349,6 +351,62 @@ def run_once() -> dict:
             open_orders = [o for o in open_orders if o.get("side") != "sell"]
 
         if has_position:
+            price_now = mid_prices.get(symbol) or 0.0
+            exit_reason = protective_exit_reason(
+                avg_entry,
+                price_now,
+                (entries_after_fills.get(symbol) or {}).get("opened_at"),
+                datetime.now(timezone.utc),
+            )
+            if exit_reason:
+                exit_price = price_now * (1 - 0.003)
+                existing_sell = next(
+                    (
+                        o
+                        for o in open_orders
+                        if o.get("side") == "sell"
+                        and str(o.get("type") or "").lower() == "limit"
+                    ),
+                    None,
+                )
+                old_px = float(existing_sell.get("price") or 0) if existing_sell else 0.0
+                if old_px and abs(old_px - exit_price) / old_px <= ORDER_UPDATE_THRESHOLD:
+                    log.info(
+                        "  %s: beschermende verkoop ongewijzigd @ $%.4f (%s)",
+                        symbol,
+                        old_px,
+                        exit_reason,
+                    )
+                    stats["unchanged"] += 1
+                    continue
+                if existing_sell:
+                    try:
+                        cancel_order_safe(client, str(existing_sell["id"]), symbol)
+                    except Exception as e:
+                        log.warning("  %s: cancel sell: %s", symbol, e)
+                        stats["skipped"] += 1
+                        continue
+                try:
+                    submit_limit_sell_all_free(
+                        client,
+                        symbol,
+                        exit_price,
+                        params={"postOnly": False},
+                    )
+                    log.info(
+                        "  %s: beschermende verkoop @ $%.4f (%s)",
+                        symbol,
+                        exit_price,
+                        exit_reason,
+                    )
+                    send_telegram(
+                        f"🛡️ [Kraken] {symbol}: beschermende verkoop @ "
+                        f"${exit_price:.4f} ({exit_reason})"
+                    )
+                    stats["updated" if existing_sell else "placed"] += 1
+                except Exception as e:
+                    log.warning("  %s: beschermende verkoop mislukt: %s", symbol, e)
+                continue
             for o in open_orders:
                 if o.get("side") != "buy":
                     continue
@@ -586,6 +644,13 @@ def run_once() -> dict:
                     log.warning("  %s: sell fout: %s", symbol, e)
                     send_telegram(f"❌ [Kraken] {symbol}: sell-fout: {e}")
         elif symbol in symbols and symbol in levels:
+            if new_buys_paused(read_equity_rows()):
+                log.info(
+                    "  %s: geen nieuwe buy, equity staat meer dan 15%% onder de piek",
+                    symbol,
+                )
+                stats["skipped"] += 1
+                continue
             current_price = mid_prices.get(symbol)
             existing_buy = next(
                 (
@@ -819,9 +884,9 @@ def run_once() -> dict:
                 cash_usd=buying_final,
                 positions_usd={
                     s: q * mid_prices[s]
-                    for s, (q, _) in held_final.items()
+                    for s, (q, entry) in held_final.items()
                     if s in mid_prices
-                    and is_tradable_position(q, mid_prices[s])
+                    and is_open_position(q, mid_prices[s], entry)
                 },
             )
         except OSError as e:

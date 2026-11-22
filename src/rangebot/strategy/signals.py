@@ -9,10 +9,11 @@ from rangebot.config.settings import (
 )
 from rangebot.data.market_data import fetch_symbol_rows_for_pool
 from rangebot.exchange.base import ExchangeClient
+from rangebot.exchange.kraken.state_and_fills import entry_prices_from_state
 from rangebot.execution.position_manager import (
     get_qty_for_symbol,
     held_qty,
-    is_tradable_position,
+    is_open_position,
 )
 from rangebot.strategy.range_strategy import (
     build_levels_scored_from_symbol_rows,
@@ -43,9 +44,11 @@ def symbols_with_balance(
     client: ExchangeClient,
     pool: list[str],
     prices: dict[str, float] | None = None,
+    entry_prices: dict[str, float] | None = None,
 ) -> set[str]:
-    """Symbols in pool with tradable notional (above dust fee floor)."""
+    """Symbols in pool with a real position, valued at market or at cost."""
     out: set[str] = set()
+    entries = entry_prices or {}
     for sym in pool:
         qf, qt = get_qty_for_symbol(client, sym)
         qty = held_qty(qf, qt)
@@ -53,10 +56,10 @@ def symbols_with_balance(
             try:
                 ref_px = client.get_latest_price(sym)
             except Exception:
-                continue
+                ref_px = None
         else:
             ref_px = prices.get(sym)
-        if ref_px and is_tradable_position(qty, float(ref_px)):
+        if is_open_position(qty, float(ref_px or 0), float(entries.get(sym) or 0)):
             out.add(sym)
     return out
 
@@ -86,7 +89,9 @@ def select_top_symbols_for_range(
         rows_map, pool, min_spread_frac
     )
     pool_prices = pool_latest_prices(client, pool)
-    symbols_with_positions = symbols_with_balance(client, pool, prices=pool_prices)
+    symbols_with_positions = symbols_with_balance(
+        client, pool, prices=pool_prices, entry_prices=entry_prices_from_state()
+    )
     selected, levels = select_top_symbols_from_scores(
         levels_scored,
         symbols_with_positions,

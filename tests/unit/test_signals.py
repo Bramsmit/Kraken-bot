@@ -37,6 +37,16 @@ def test_symbols_with_balance_counts_locked_position() -> None:
     assert signals.symbols_with_balance(client, ["AAVE/USD"]) == {"AAVE/USD"}
 
 
+def test_symbols_with_balance_keeps_bag_whose_market_value_fell_below_minimum() -> None:
+    """Kostenbasis telt: UNI op $24 marktwaarde met instap $77 blijft een slot."""
+    client = MagicMock(spec=ExchangeClient)
+    client.get_open_positions.return_value = {"UNI/USD": (8.188, 8.188)}
+    client.get_latest_price.return_value = 3.0
+    assert signals.symbols_with_balance(
+        client, ["UNI/USD"], entry_prices={"UNI/USD": 9.4014}
+    ) == {"UNI/USD"}
+
+
 def test_symbols_with_balance_skips_symbol_when_price_unavailable() -> None:
     client = MagicMock(spec=ExchangeClient)
     client.get_open_positions.return_value = {"ETH/USD": (1.0, 30.0)}
