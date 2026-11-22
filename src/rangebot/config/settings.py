@@ -179,6 +179,43 @@ STOP_LOSS_VALUES_TO_TEST = [0.01, 0.02, 0.03, 0.05, 0.10]
 # Stof: onder deze vrije hoeveelheid geen sell / geen "positie" voor selectie
 MIN_SELLABLE_CRYPTO_QTY = Decimal("0.0001")
 
+# --- Position deadlock prevention ---
+# Voorkomt dat onderwater-posities alle koopslots blokkeren door de sell-floor
+# geleidelijk te verlagen na een maximale houdtermijn.
+
+import os as _os_deadlock
+
+# Max houdtijd voordat floor-versoepeling begint (None = uitgeschakeld, aanbevolen: 336 = 14 dagen).
+_max_hold = _os_deadlock.environ.get("MAX_POSITION_HOLDING_HOURS", "").strip()
+MAX_POSITION_HOLDING_HOURS: int | None = int(_max_hold) if _max_hold.isdigit() else None
+
+# Hoe de sell-floor verlaagd wordt na MAX_POSITION_HOLDING_HOURS:
+# - "disabled" (default): feature uitgeschakeld, floor blijft constant
+# - "linear": lineaire daling over SELL_FLOOR_DECAY_HOURS naar MIN_MULTIPLIER
+# - "step": directe sprong naar MIN_MULTIPLIER zodra MAX_POSITION_HOLDING_HOURS bereikt
+SELL_FLOOR_DECAY_MODE = _os_deadlock.environ.get("SELL_FLOOR_DECAY_MODE", "disabled").strip().lower()
+
+# Duur van lineaire verval (uren na MAX_POSITION_HOLDING_HOURS; standaard 168 = 7 dagen).
+_decay_hours = _os_deadlock.environ.get("SELL_FLOOR_DECAY_HOURS", "168").strip()
+SELL_FLOOR_DECAY_HOURS = int(_decay_hours) if _decay_hours.isdigit() else 168
+
+# Minimale floor-multiplier: 1.0 = originele floor (break-even + fees), 0.995 = tot -0.5% verlies.
+# Conservatieve default 0.998 (-0.2%) beperkt verliezen terwijl slots wel vrijkomen.
+SELL_FLOOR_MIN_MULTIPLIER = float(
+    _os_deadlock.environ.get("SELL_FLOOR_MIN_MULTIPLIER", "0.998")
+)
+
+# Hard stop-loss: forceert exit bij een vast verliespercentage, ongeacht houdtijd.
+# Uitgeschakeld tenzij expliciet ingeschakeld (POSITION_HARD_STOP_LOSS_ENABLED=true).
+POSITION_HARD_STOP_LOSS_ENABLED = _os_deadlock.environ.get(
+    "POSITION_HARD_STOP_LOSS_ENABLED", "false"
+).strip().lower() in ("1", "true", "yes", "on")
+
+# Stop-loss drempel onder entry (standaard -0.15 = -15%). Alleen actief als _ENABLED=true.
+POSITION_HARD_STOP_LOSS_PCT = float(
+    _os_deadlock.environ.get("POSITION_HARD_STOP_LOSS_PCT", "-0.15")
+)
+
 # Backtest
 BACKTEST_MONTHS = 3
 TIMEFRAME = "1Day"
